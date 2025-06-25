@@ -27,12 +27,12 @@ export async function refineQuery({
   model: SupportedModel;
 }): Promise<{ refinedQuery: string; usage: TokenUsage }> {
 
-  // Use a fast and cheap model for this simple task
-  const refinerModel = getModelProvider('openai:gpt-4o-mini');
+  // Use the model passed as a parameter for consistency
+  const refinerModel = getModelProvider(model);
   const prompt = createRefinerPrompt(initialQuery, subQuery);
 
   const { text, usage } = await generateText({
-    model: refinerModel,
+    model: refinerModel, // Use the dynamically selected model
     prompt: prompt,
     maxTokens: 50, // Keep the output short and focused
   });

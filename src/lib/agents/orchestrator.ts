@@ -17,10 +17,11 @@ type ResearchState = {
 
 // --- FIX #3: Define the missing 'createContextualPrompt' function ---
 function createContextualPrompt(state: ResearchState, followUpQuestions: string[]): string {
+    const completedTopicsString = Array.from(state.completedQueries).join('; ');
     return `The overall research goal is: "${state.initialQuery}".
-We have already researched the following topics: ${Array.from(state.completedQueries).join(', ')}.
-Based on the last learning, please now investigate the following questions: ${followUpQuestions.join(', ')}.
-Generate focused search queries to answer these questions.`;
+We have already gathered information on the following topics/sub-queries: "${completedTopicsString}".
+To advance our research, please now investigate and generate specific, focused search queries for the following new questions: ${followUpQuestions.join(', ')}.
+Ensure the new queries explore aspects not covered by the already researched topics.`;
 }
 
 // Renamed to 'deepResearch' for clarity, was 'recursiveOrchestrator'
@@ -54,10 +55,11 @@ async function deepResearch({
   for (const subQuery of subQueries) {
     if (state.completedQueries.has(subQuery)) continue;
     state.completedQueries.add(subQuery);
+
+    const learningsBeforeSubQuery = state.allLearnings.length;
     
-    // --- FIX #2: Pass the correct 'initialQuery' string to the refiner ---
     const { refinedQuery, usage: refinerUsage } = await refineQuery({
-        initialQuery: state.initialQuery, // Use the original goal for context
+        initialQuery: state.initialQuery,
         subQuery,
         model,
     });
@@ -75,7 +77,12 @@ async function deepResearch({
     state.tokenTracker.outputTokens += evaluationUsage.outputTokens;
     onData({ type: 'relevance-check', data: { usage: evaluationUsage } });
 
+    let learningsProcessedForSubQuery = 0;
+    const MAX_LEARNINGS_PER_SUB_QUERY = 2;
+    const aggregatedFollowUpQuestions: string[] = [];
+
     for (const result of relevantResults) {
+      if (learningsProcessedForSubQuery >= MAX_LEARNINGS_PER_SUB_QUERY) break;
       if (state.approvedUrls.has(result.url)) continue;
 
       const document = await fetchAndParseContent(result);
@@ -83,23 +90,35 @@ async function deepResearch({
         state.approvedUrls.add(document.metadata.url);
 
         const { learning, usage: learningUsage } = await extractLearning({ query: subQuery, document, model });
-        state.allLearnings.push(learning); // This array will now be populated
+        state.allLearnings.push(learning);
         onData({ type: 'learning', data: { learning, usage: learningUsage } });
 
-        if (depth > 1 && learning.followUpQuestions.length > 0) {
-          const newPromptForRecursion = createContextualPrompt(state, learning.followUpQuestions);
-          await deepResearch({
-            prompt: newPromptForRecursion,
-            depth: depth - 1,
-            breadth: Math.ceil(breadth / 2),
-            model,
-            onData,
-            state,
-          });
+        if (learning.followUpQuestions && learning.followUpQuestions.length > 0) {
+            aggregatedFollowUpQuestions.push(...learning.followUpQuestions);
         }
-        // Break to move to the next sub-query after finding one good source
-        break; 
+
+        learningsProcessedForSubQuery++;
       }
+    }
+
+    // After processing results for a sub-query, if there are follow-up questions, recurse.
+    if (depth > 1 && aggregatedFollowUpQuestions.length > 0) {
+      // Remove duplicates from aggregated follow-up questions
+      const uniqueFollowUpQuestions = [...new Set(aggregatedFollowUpQuestions)];
+      const newPromptForRecursion = createContextualPrompt(state, uniqueFollowUpQuestions);
+      await deepResearch({
+        prompt: newPromptForRecursion,
+        depth: depth - 1,
+        breadth: Math.ceil(breadth / 2), // Consider if breadth needs adjustment based on # of follow-ups
+        model,
+        onData,
+        state,
+      });
+    }
+
+    // Log if a sub-query (and its potential recursive calls) did not yield new learnings
+    if (state.allLearnings.length === learningsBeforeSubQuery) {
+      console.log(`ORCHESTRATOR_INFO: Sub-query "${subQuery}" and its recursive calls did not yield new learnings. Initial query context: "${state.initialQuery}"`);
     }
   }
 }

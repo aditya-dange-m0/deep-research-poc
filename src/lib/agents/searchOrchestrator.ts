@@ -31,7 +31,7 @@ export async function performSearch(query: string): Promise<SearchResult[]> {
     key: apiKey,
     cx: cx,
     q: query,
-    num: '3',
+    num: '5', // Increased from 3 to 5
   });
 
   let attempt = 0;

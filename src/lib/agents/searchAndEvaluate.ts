@@ -18,17 +18,23 @@ function createEvaluationPrompt(searchResult: SearchResult, query: string, exist
 - Title: "${searchResult.title}"
 - URL: ${searchResult.url}
 - Snippet: "${searchResult.snippet}"
+- Published Date (if available): ${searchResult.publishedAt || 'Not available'}
 
 **URLs of sources already collected in this research session:**
 ${existingUrls.length > 0 ? existingUrls.join('\n') : 'None'}
 
 **Evaluation Criteria:**
-1.  **Relevance:** Is the content described in the title and snippet HIGHLY and DIRECTLY relevant to the "User's Current Query"?
-2.  **Uniqueness:** Is the URL a new source not already present in the list of collected sources?
+1.  **Direct Relevance:** Does the title and snippet CLEARLY indicate that the content will DIRECTLY answer or provide significant, specific insight into the "User's Current Query"? Avoid broad or tangentially related topics.
+2.  **Source Quality:**
+    *   Prioritize authoritative sources such as academic papers, official documentation, reputable news organizations, and well-known industry reports.
+    *   Treat user-generated content (forums, personal blogs unless by a recognized expert, social media discussions) with caution. It should only be 'RELEVANT' if it provides unique, verifiable information not found elsewhere.
+    *   Is the source an advertisement or primarily trying to sell a product rather than inform? If so, it's 'IRRELEVANT'.
+3.  **Uniqueness:** Is the URL a new source, not already present in the list of collected sources? (A different page on an already used domain is acceptable if the content is distinct and relevant).
+4.  **Timeliness (Consider if applicable to the query):** If the query implies a need for recent information (e.g., "latest trends in X", "current status of Y"), does the published date (if available) support its relevance? Older, foundational content can still be relevant for general knowledge.
 
 **Decision:**
-- If the result is highly relevant AND unique, classify it as 'RELEVANT'.
-- If it is a duplicate, off-topic, an advertisement, or a low-quality forum, classify it as 'IRRELEVANT'.
+- Classify as 'RELEVANT' ONLY IF it meets criteria for Direct Relevance, Source Quality, and Uniqueness. Timeliness is a factor to weigh.
+- Otherwise, classify as 'IRRELEVANT'. This includes duplicates, off-topic content, advertisements, or low-quality/unreliable sources.
 
 Return your final classification in the 'evaluation' field.`;
 }
