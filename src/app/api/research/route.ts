@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ResearchRequestSchema, SupportedModel } from '@/lib/types';
-import { startResearch } from '../../../lib/agents/orchestrator';
+import { startResearch } from '../../../lib/orchestrator';
 
 export async function POST(req: NextRequest) {
   try {

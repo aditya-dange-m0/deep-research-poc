@@ -1,13 +1,12 @@
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { TokenUsage,SupportedModel } from '@/lib/types';
-import { getModelProvider } from '@/lib/models'; 
-
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { TokenUsage, SupportedModel } from "@/lib/types";
+import { getModelProvider } from "@/lib/models";
 
 export async function generateSubQueries({
   query,
   breadth,
-  model
+  model,
 }: {
   query: string;
   breadth: number;
@@ -43,18 +42,26 @@ If the Core Research Topic is "The impact of solid-state batteries on the EV ind
 > Comparison of energy density between solid-state and lithium-ion batteries
 > Major automotive companies investing in solid-state battery technology
 
-Begin generation now.`; // Same prompt as before
-  
+Begin generation now.`;
+
   const { text, usage } = await generateText({
     model: getModelProvider(model), //openai('gpt-4o-mini'),
     prompt: prompt,
   });
 
-  const queries = text.split('\n').map(q => q.trim()).filter(q => q.length > 0);
-  console.log(`SUB_QUERIES_GENERATED for "${query}": Input tokens: ${usage.promptTokens}, Output tokens: ${usage.completionTokens}`);
-  
+  const queries = text
+    .split("\n")
+    .map((q) => q.trim())
+    .filter((q) => q.length > 0);
+  console.log(
+    `SUB_QUERIES_GENERATED for "${query}": Input tokens: ${usage.promptTokens}, Output tokens: ${usage.completionTokens}`
+  );
+
   return {
     queries,
-    usage: { inputTokens: usage.promptTokens, outputTokens: usage.completionTokens },
+    usage: {
+      inputTokens: usage.promptTokens,
+      outputTokens: usage.completionTokens,
+    },
   };
 }

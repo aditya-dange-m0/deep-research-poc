@@ -1,10 +1,15 @@
-import { Learning, ResearchRequestBody, TokenUsage, SupportedModel } from '@/lib/types';
-import { generateSubQueries } from './subQueryGenerator';
-import { refineQuery } from './queryRefiner';
-import { searchAndEvaluate } from './searchAndEvaluate';
-import { fetchAndParseContent } from './contentFetcher';
-import { extractLearning } from './learningExtractor';
-import { generateReport } from './reportGenerator';
+import {
+  Learning,
+  ResearchRequestBody,
+  TokenUsage,
+  SupportedModel,
+} from "@/lib/types";
+import { generateSubQueries } from "./agents/subQueryGenerator";
+import { refineQuery } from "./agents/queryRefiner";
+import { searchAndEvaluate } from "./agents/searchAndEvaluate";
+import { fetchAndParseContent } from "./agents/contentFetcher";
+import { extractLearning } from "./agents/learningExtractor";
+import { generateReport } from "./agents/reportGenerator";
 
 // --- FIX #1: Add 'initialQuery' to the ResearchState type ---
 type ResearchState = {
@@ -16,11 +21,42 @@ type ResearchState = {
 };
 
 // --- FIX #3: Define the missing 'createContextualPrompt' function ---
-function createContextualPrompt(state: ResearchState, followUpQuestions: string[]): string {
-    return `The overall research goal is: "${state.initialQuery}".
-We have already researched the following topics: ${Array.from(state.completedQueries).join(', ')}.
-Based on the last learning, please now investigate the following questions: ${followUpQuestions.join(', ')}.
-Generate focused search queries to answer these questions.`;
+function createContextualPrompt(
+  state: ResearchState,
+  followUpQuestions: string[]
+): string {
+  const completedTopicsString = Array.from(state.completedQueries).join("; ");
+  const followUpQuestionsString = followUpQuestions
+    .map((q) => `- "${q}"`)
+    .join("\n");
+
+  return `You are a strategic AI Research Orchestrator. Your current mission is to guide the next phase of a deep research inquiry by generating precise, highly targeted search queries.
+
+---
+
+**Overall Research Goal:** "${state.initialQuery}"
+
+**Topics and Sub-Queries Already Thoroughly Investigated and Documented:**
+${completedTopicsString.length > 0 ? completedTopicsString : "None yet."}
+
+**New, Unanswered Follow-Up Questions Requiring Investigation (Derived from recent learnings):**
+${followUpQuestionsString}
+
+---
+
+**YOUR TASK:**
+Generate a list of specific, focused, and actionable search engine queries. These queries must directly address the "New, Unanswered Follow-Up Questions" while explicitly aiming to explore aspects *not yet covered* by the "Topics and Sub-Queries Already Thoroughly Investigated."
+
+**Strict Rules for Query Generation:**
+1.  **Directly Address Follow-ups:** Each generated search query must directly aim to answer one or more of the provided "New, Unanswered Follow-Up Questions."
+2.  **Avoid Redundancy:** Absolutely do NOT generate queries for topics or information already present in the "Topics and Sub-Queries Already Thoroughly Investigated." Prioritize truly novel investigative paths.
+3.  **Specificity & Search-Engine Ready:** Queries must be concise, factual, and optimized for a web search engine. Avoid conversational language or vague terms.
+4.  **Collective Coverage:** The generated queries should collectively aim to make significant progress in answering the *set* of follow-up questions.
+5.  **Output Format:** Provide only the generated search queries. Each query on a new line, with no numbering, bullet points, or any other formatting characters.
+
+---
+
+**Generate the specific search queries now:**`;
 }
 
 // Renamed to 'deepResearch' for clarity, was 'recursiveOrchestrator'
@@ -40,40 +76,53 @@ async function deepResearch({
   state: ResearchState;
 }) {
   if (depth === 0) {
-    console.log('REACHED MAX DEPTH');
+    console.log("REACHED MAX DEPTH");
     return;
   }
-  
-  onData({ type: 'query-start', data: prompt });
 
-  const { queries: subQueries, usage: subQueryUsage } = await generateSubQueries({ query: prompt, breadth, model });
+  onData({ type: "query-start", data: prompt });
+
+  const { queries: subQueries, usage: subQueryUsage } =
+    await generateSubQueries({ query: prompt, breadth, model });
   state.tokenTracker.inputTokens += subQueryUsage.inputTokens;
   state.tokenTracker.outputTokens += subQueryUsage.outputTokens;
-  onData({ type: 'token-usage', data: { step: 'sub-query', usage: subQueryUsage } });
+  onData({
+    type: "token-usage",
+    data: { step: "sub-query", usage: subQueryUsage },
+  });
+
+  // Declare the array to collect follow-up questions for this batch of sub-queries
+  const aggregatedFollowUpQuestions: string[] = [];
 
   for (const subQuery of subQueries) {
     if (state.completedQueries.has(subQuery)) continue;
     state.completedQueries.add(subQuery);
-    
-    // --- FIX #2: Pass the correct 'initialQuery' string to the refiner ---
+
+    const learningsBeforeSubQuery = state.allLearnings.length;
+
     const { refinedQuery, usage: refinerUsage } = await refineQuery({
-        initialQuery: state.initialQuery, // Use the original goal for context
-        subQuery,
-        model,
+      initialQuery: state.initialQuery,
+      subQuery,
+      model,
     });
     state.tokenTracker.inputTokens += refinerUsage.inputTokens;
     state.tokenTracker.outputTokens += refinerUsage.outputTokens;
-    onData({ type: 'refining-query', data: { query: refinedQuery, usage: refinerUsage }});
-
-    const { relevantResults, usage: evaluationUsage } = await searchAndEvaluate({
-      query: refinedQuery,
-      existingUrls: Array.from(state.approvedUrls),
-      model,
+    onData({
+      type: "refining-query",
+      data: { query: refinedQuery, usage: refinerUsage },
     });
-    
+
+    const { relevantResults, usage: evaluationUsage } = await searchAndEvaluate(
+      {
+        query: refinedQuery,
+        existingUrls: Array.from(state.approvedUrls),
+        model,
+      }
+    );
+
     state.tokenTracker.inputTokens += evaluationUsage.inputTokens;
     state.tokenTracker.outputTokens += evaluationUsage.outputTokens;
-    onData({ type: 'relevance-check', data: { usage: evaluationUsage } });
+    onData({ type: "relevance-check", data: { usage: evaluationUsage } });
 
     for (const result of relevantResults) {
       if (state.approvedUrls.has(result.url)) continue;
@@ -82,34 +131,63 @@ async function deepResearch({
       if (document) {
         state.approvedUrls.add(document.metadata.url);
 
-        const { learning, usage: learningUsage } = await extractLearning({ query: subQuery, document, model });
-        state.allLearnings.push(learning); // This array will now be populated
-        onData({ type: 'learning', data: { learning, usage: learningUsage } });
+        const { learning, usage: learningUsage } = await extractLearning({
+          query: subQuery,
+          document,
+          model,
+        });
+        state.allLearnings.push(learning);
+        onData({ type: "learning", data: { learning, usage: learningUsage } });
 
-        if (depth > 1 && learning.followUpQuestions.length > 0) {
-          const newPromptForRecursion = createContextualPrompt(state, learning.followUpQuestions);
-          await deepResearch({
-            prompt: newPromptForRecursion,
-            depth: depth - 1,
-            breadth: Math.ceil(breadth / 2),
-            model,
-            onData,
-            state,
-          });
+        if (
+          learning.followUpQuestions &&
+          learning.followUpQuestions.length > 0
+        ) {
+          aggregatedFollowUpQuestions.push(...learning.followUpQuestions);
         }
         // Break to move to the next sub-query after finding one good source
         break; 
       }
     }
+
+    // After processing results for a sub-query, if there are follow-up questions, recurse.
+    if (depth > 1 && aggregatedFollowUpQuestions.length > 0) {
+      // Remove duplicates from aggregated follow-up questions
+      const uniqueFollowUpQuestions = [...new Set(aggregatedFollowUpQuestions)];
+      const newPromptForRecursion = createContextualPrompt(
+        state,
+        uniqueFollowUpQuestions
+      );
+      await deepResearch({
+        prompt: newPromptForRecursion,
+        depth: depth - 1,
+        breadth: Math.ceil(breadth / 2), // Consider if breadth needs adjustment based on # of follow-ups
+        model,
+        onData,
+        state,
+      });
+    }
+
+    // Log if a sub-query (and its potential recursive calls) did not yield new learnings
+    if (state.allLearnings.length === learningsBeforeSubQuery) {
+      console.log(
+        `ORCHESTRATOR_INFO: Sub-query "${subQuery}" and its recursive calls did not yield new learnings. Initial query context: "${state.initialQuery}"`
+      );
+    }
   }
 }
 
 export async function startResearch(
-  { initialQuery, depth, breadth, model }: { 
-      initialQuery: string; 
-      depth: number; 
-      breadth: number; 
-      model: SupportedModel;
+  {
+    initialQuery,
+    depth,
+    breadth,
+    model,
+  }: {
+    initialQuery: string;
+    depth: number;
+    breadth: number;
+    model: SupportedModel;
   },
   onData: (data: any) => void
 ) {
@@ -140,22 +218,22 @@ export async function startResearch(
     });
     state.tokenTracker.inputTokens += reportUsage.inputTokens;
     state.tokenTracker.outputTokens += reportUsage.outputTokens;
-    onData({ type: 'report', data: { report, usage: reportUsage } });
+    onData({ type: "report", data: { report, usage: reportUsage } });
   } else {
-    onData({ type: 'error', data: "Research concluded, but no relevant learnings were found to generate a report." });
+    onData({
+      type: "error",
+      data: "Research concluded, but no relevant learnings were found to generate a report.",
+    });
   }
 
   onData({
-    type: 'done',
+    type: "done",
     data: {
-      message: 'Research complete.',
+      message: "Research complete.",
       totalUsage: state.tokenTracker,
     },
   });
 }
-
-
-
 
 // import { Learning, ResearchRequestBody, TokenUsage, SupportedModel } from '@/lib/types';
 // import { generateSubQueries } from './subQueryGenerator';
@@ -202,7 +280,7 @@ export async function startResearch(
 //     console.log('REACHED MAX DEPTH');
 //     return;
 //   }
-  
+
 //   onData({ type: 'query-start', data: prompt });
 
 //   const { queries: subQueries, usage: subQueryUsage } = await generateSubQueries({ query: prompt, breadth, model });
@@ -212,7 +290,7 @@ export async function startResearch(
 
 //   for (const subQuery of subQueries) {
 //     if (state.completedQueries.has(subQuery)) continue;
-    
+
 //     const { refinedQuery, usage: refinerUsage } = await refineQuery({
 //         initialQuery: state.initialQuery, // This line will now work
 //         subQuery,
@@ -227,7 +305,7 @@ export async function startResearch(
 //       existingUrls: Array.from(state.approvedUrls),
 //       model,
 //     });
-    
+
 //     state.tokenTracker.inputTokens += evaluationUsage.inputTokens;
 //     state.tokenTracker.outputTokens += evaluationUsage.outputTokens;
 //     onData({ type: 'relevance-check', data: { usage: evaluationUsage } });
@@ -262,10 +340,10 @@ export async function startResearch(
 // }
 
 // export async function startResearch(
-//   { initialQuery, depth, breadth, model }: { 
-//       initialQuery: string; 
-//       depth: number; 
-//       breadth: number; 
+//   { initialQuery, depth, breadth, model }: {
+//       initialQuery: string;
+//       depth: number;
+//       breadth: number;
 //       model: SupportedModel;
 //   },
 //   onData: (data: any) => void
@@ -307,18 +385,15 @@ export async function startResearch(
 //   });
 // }
 
-
-
 // import { generateSubQueries } from './subQueryGenerator';
 // import { performSearch } from './searchOrchestrator';
 // import { fetchAndParseContent } from './contentFetcher';
 // import { extractLearning } from './learningExtractor';
 // import { Learning, ResearchRequestBody, TokenUsage, SupportedModel } from '@/lib/types';
 // import { generateReport } from './reportGenerator';
-// // import { checkRelevance } from './relevanceChecker'; 
+// // import { checkRelevance } from './relevanceChecker';
 // import { searchAndEvaluate } from './searchAndEvaluate';
-// import { refineQuery } from './queryRefiner'; 
-
+// import { refineQuery } from './queryRefiner';
 
 // // State for a single research request
 // type ResearchState = {
@@ -354,13 +429,13 @@ export async function startResearch(
 // //   const { queries: subQueries, usage: subQueryUsage } = depth > 1
 // //     ? await generateSubQueries({ query, breadth, model })
 // //     : { queries: [query], usage: { inputTokens: 0, outputTokens: 0 } };
-  
+
 // //   state.tokenTracker.inputTokens += subQueryUsage.inputTokens;
 // //   state.tokenTracker.outputTokens += subQueryUsage.outputTokens;
 // //   if(subQueryUsage.inputTokens > 0) {
 // //     onData({ type: 'token-usage', data: { step: 'sub-query', usage: subQueryUsage } });
 // //   }
-  
+
 // //   const followUpQueue: string[] = [];
 
 // //   for (const subQuery of subQueries) {
@@ -425,19 +500,19 @@ export async function startResearch(
 // //   const { queries: subQueries, usage: subQueryUsage } = depth > 1
 // //     ? await generateSubQueries({ query, breadth, model })
 // //     : { queries: [query], usage: { inputTokens: 0, outputTokens: 0 } };
-  
+
 // //   state.tokenTracker.inputTokens += subQueryUsage.inputTokens;
 // //   state.tokenTracker.outputTokens += subQueryUsage.outputTokens;
 // //   if(subQueryUsage.inputTokens > 0) {
 // //     onData({ type: 'token-usage', data: { step: 'sub-query', usage: subQueryUsage } });
 // //   }
-  
+
 // //   const followUpQueue: string[] = [];
 
 // //   for (const subQuery of subQueries) {
 // //     // Check for completion here, right before processing the specific sub-query.
 // //     if (state.completedQueries.has(subQuery)) continue;
-    
+
 // //     // NOW we mark this specific sub-query as being processed.
 // //     state.completedQueries.add(subQuery);
 
@@ -514,9 +589,9 @@ export async function startResearch(
 
 //   for (const subQuery of subQueries) {
 //     if (state.completedQueries.has(subQuery)) continue;
-    
+
 //     // --- NEW LOGIC INTEGRATED HERE ---
-    
+
 //     // Step 2: Refine the conceptual sub-query into an effective search string
 //     const { refinedQuery, usage: refinerUsage } = await refineQuery({
 //         initialQuery: state.initialQuery, // Use the overall goal for context
@@ -533,7 +608,7 @@ export async function startResearch(
 //       existingUrls: Array.from(state.approvedUrls),
 //       model,
 //     });
-    
+
 //     state.tokenTracker.inputTokens += evaluationUsage.inputTokens;
 //     state.tokenTracker.outputTokens += evaluationUsage.outputTokens;
 //     onData({ type: 'relevance-check', data: { usage: evaluationUsage } });
@@ -570,10 +645,10 @@ export async function startResearch(
 // }
 
 // export async function startResearch(
-//   { initialQuery, depth, breadth, model }: { 
-//       initialQuery: string; 
-//       depth: number; 
-//       breadth: number; 
+//   { initialQuery, depth, breadth, model }: {
+//       initialQuery: string;
+//       depth: number;
+//       breadth: number;
 //       model: SupportedModel;
 //        // This now explicitly requires a defined model
 //   },

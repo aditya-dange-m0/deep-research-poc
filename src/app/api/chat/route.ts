@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       ...messages,
     ];
 
-    const model = getModelProvider('google:gemini-1.5-flash-latest');
+    const model = getModelProvider('openai:gpt-4o-mini');
 
     const result = await streamText({
       model: model,

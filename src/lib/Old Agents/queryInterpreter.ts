@@ -1,5 +1,5 @@
-import { v4 as uuidv4 } from 'uuid';
-import { ResearchRequestBody, ResearchRequest } from '@/lib/types';
+import { v4 as uuidv4 } from "uuid";
+import { ResearchRequestBody, ResearchRequest } from "@/lib/types";
 
 /**
  * Validates and transforms the initial user request into a structured ResearchRequest.
@@ -25,7 +25,9 @@ export function interpretQuery(body: ResearchRequestBody): ResearchRequest {
   };
 
   // Log: "REQUEST_RECEIVED"
-  console.log(`REQUEST_RECEIVED: id=${researchRequest.id}, query="${researchRequest.query}"`);
-  
+  console.log(
+    `REQUEST_RECEIVED: id=${researchRequest.id}, query="${researchRequest.query}"`
+  );
+
   return researchRequest;
 }

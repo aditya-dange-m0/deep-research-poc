@@ -1,10 +1,10 @@
-import { SearchResult, TokenUsage } from '@/lib/types';
-import { getModelProvider } from '@/lib/models';
-import { generateObject } from 'ai';
-import { z } from 'zod';
+import { SearchResult, TokenUsage } from "@/lib/types";
+import { getModelProvider } from "@/lib/models";
+import { generateObject } from "ai";
+import { z } from "zod";
 
 // We use a simple enum schema for a clear, cheap evaluation from the LLM.
-const RelevanceSchema = z.enum(['RELEVANT', 'IRRELEVANT']);
+const RelevanceSchema = z.enum(["RELEVANT", "IRRELEVANT"]);
 
 /**
  * Creates a tailored prompt for the AI to evaluate a single search result.
@@ -13,7 +13,11 @@ const RelevanceSchema = z.enum(['RELEVANT', 'IRRELEVANT']);
  * @param existingUrls A list of URLs already approved to check for duplicates.
  * @returns A string prompt for the language model.
  */
-function createEvaluationPrompt(searchResult: SearchResult, query: string, existingUrls: string[]): string {
+function createEvaluationPrompt(
+  searchResult: SearchResult,
+  query: string,
+  existingUrls: string[]
+): string {
   return `You are a meticulous research assistant. Your task is to evaluate if a search result is relevant to a user's query and if it's a unique source.
 
 **User's Query:** "${query}"
@@ -24,7 +28,7 @@ function createEvaluationPrompt(searchResult: SearchResult, query: string, exist
 - Snippet: "${searchResult.snippet}"
 
 **Existing Approved URLs:**
-${existingUrls.length > 0 ? existingUrls.join('\n') : 'None'}
+${existingUrls.length > 0 ? existingUrls.join("\n") : "None"}
 
 **Evaluation Criteria:**
 1.  **Relevance:** Is the content described in the title and snippet likely to directly answer or provide significant insight into the user's query?
@@ -50,9 +54,11 @@ export async function checkRelevance({
   query: string;
   existingUrls: string[];
 }): Promise<{ relevantResults: SearchResult[]; usage: TokenUsage }> {
-  
-  const model = getModelProvider('openai:gpt-4o-mini'); // Use a fast model for this
-  const evaluations: Promise<{ result: SearchResult | null, usage: TokenUsage }>[] = [];
+  const model = getModelProvider("openai:gpt-4o-mini"); // Use a fast model for this
+  const evaluations: Promise<{
+    result: SearchResult | null;
+    usage: TokenUsage;
+  }>[] = [];
 
   for (const result of searchResults) {
     const evaluationTask = async () => {
@@ -62,24 +68,37 @@ export async function checkRelevance({
         schema: RelevanceSchema,
         prompt,
       });
-      
+
       console.log(`EVALUATION: URL: ${result.url}, Relevant: ${object}`);
-      
-      const tokenUsage = { inputTokens: usage.promptTokens, outputTokens: usage.completionTokens };
-      return { result: object === 'RELEVANT' ? result : null, usage: tokenUsage };
+
+      const tokenUsage = {
+        inputTokens: usage.promptTokens,
+        outputTokens: usage.completionTokens,
+      };
+      return {
+        result: object === "RELEVANT" ? result : null,
+        usage: tokenUsage,
+      };
     };
     evaluations.push(evaluationTask());
   }
 
   const results = await Promise.all(evaluations);
 
-  const relevantResults = results.map(r => r.result).filter((r): r is SearchResult => r !== null);
-  const totalUsage = results.reduce((acc, r) => {
-    acc.inputTokens += r.usage.inputTokens;
-    acc.outputTokens += r.usage.outputTokens;
-    return acc;
-  }, { inputTokens: 0, outputTokens: 0 });
+  const relevantResults = results
+    .map((r) => r.result)
+    .filter((r): r is SearchResult => r !== null);
+  const totalUsage = results.reduce(
+    (acc, r) => {
+      acc.inputTokens += r.usage.inputTokens;
+      acc.outputTokens += r.usage.outputTokens;
+      return acc;
+    },
+    { inputTokens: 0, outputTokens: 0 }
+  );
 
-  console.log(`RELEVANCE_CHECK_COMPLETE: Found ${relevantResults.length} relevant results out of ${searchResults.length}`);
+  console.log(
+    `RELEVANCE_CHECK_COMPLETE: Found ${relevantResults.length} relevant results out of ${searchResults.length}`
+  );
   return { relevantResults, usage: totalUsage };
 }

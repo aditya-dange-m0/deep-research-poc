@@ -19,7 +19,7 @@ export function ResearchForm({ onSubmit, isLoading }: ResearchFormProps) {
   const [query, setQuery] = useState('');
   const [depth, setDepth] = useState(2);
   const [breadth, setBreadth] = useState(2);
-  const [model, setModel] = useState<SupportedModel>('google:gemini-1.5-flash-latest');
+  const [model, setModel] = useState<SupportedModel>('openai:gpt-4o-mini');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
