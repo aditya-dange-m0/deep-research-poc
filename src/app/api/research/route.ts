@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ResearchRequestSchema } from '@/lib/types';
+import { ResearchRequestSchema, SupportedModel } from '@/lib/types';
 import { startResearch } from '../../../lib/agents/orchestrator';
 
-// export const runtime = 'edge'; // Use Vercel's Edge Runtime for streaming
-
-/**
- * API Endpoint for initiating a deep research task.
- * It streams back insights as they are generated.
- */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -17,33 +11,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(validatedBody.error.format(), { status: 400 });
     }
     
-    const { initialQuery, depth, breadth } = validatedBody.data;
+    const { initialQuery, depth, breadth, model } = validatedBody.data;
 
-    // Create a streaming response
+    const modelToUse: SupportedModel = model || 'google:gemini-1.5-flash-latest';
+
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        
-        // Define the callback function to handle data from the orchestrator
         const onData = (data: any) => {
           const chunk = `data: ${JSON.stringify(data)}\n\n`;
           controller.enqueue(encoder.encode(chunk));
         };
         
         try {
-          // Start the research process
-          await startResearch({ initialQuery, depth, breadth }, onData);
-          
-          // Signal completion
-          const doneMessage = { type: 'done', data: 'Research complete.' };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(doneMessage)}\n\n`));
-
+          await startResearch({ initialQuery, depth, breadth, model: modelToUse }, onData);
         } catch (error: any) {
-            console.error("Orchestration error:", error);
-            const errorMessage = { type: 'error', data: error.message || 'An internal error occurred.' };
+            console.error("Orchestration error in stream:", error);
+            const errorMessage = { type: 'error', data: error.message || 'An internal error occurred during orchestration.' };
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(errorMessage)}\n\n`));
         } finally {
-            // Close the stream
+            // The 'done' message is now sent from the orchestrator, so we just close here.
             controller.close();
         }
       },

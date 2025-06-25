@@ -1,7 +1,9 @@
-import { Document, Learning, TokenUsage } from '@/lib/types';
+import { Document, Learning, TokenUsage, SupportedModel } from '@/lib/types';
 import { generateObject } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
+import { getModelProvider } from '@/lib/models';
+
 
 // --- FIX: Define the schema for the AI's output ---
 const LearningSchema = z.object({
@@ -12,14 +14,16 @@ const LearningSchema = z.object({
 export async function extractLearning({
   query,
   document,
+  model,
 }: {
   query: string;
   document: Document;
+  model: SupportedModel;
 }): Promise<{ learning: Learning; usage: TokenUsage }> {
   const contextText = document.text.substring(0, 8000);
 
   const { object, usage: modelUsage } = await generateObject({
-    model: openai('gpt-4o-mini'),
+    model: getModelProvider(model), //openai('gpt-4o-mini'),
     // --- FIX: Use the defined schema here ---
     schema: LearningSchema,
     prompt: `Original query: "${query}"\n\nDocument content:\n"""\n${contextText}\n"""\n\nBased on the document content, extract a key learning and generate follow-up questions relevant to the original query.`,

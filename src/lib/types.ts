@@ -5,10 +5,20 @@ export type ID = string;
 
 // --- Input Validation Schema ---
 
+export const supportedModels = [
+    'openai:gpt-4o-mini',
+    'google:gemini-1.5-flash-latest',
+    'google:gemini-1.5-pro-latest',
+] as const;
+export type SupportedModel = typeof supportedModels[number];
+
+
+// --- VERIFIED: Input validation schema is correct ---
 export const ResearchRequestSchema = z.object({
   initialQuery: z.string().min(1, "Query cannot be empty."),
   depth: z.number().int().min(1, "Depth must be at least 1."),
   breadth: z.number().int().min(1, "Breadth must be at least 1."),
+  model: z.enum(supportedModels).optional().describe("The AI model to use for generation."),
 });
 
 export type ResearchRequestBody = z.infer<typeof ResearchRequestSchema>;
@@ -89,3 +99,4 @@ export interface CompletionData {
     message: string;
     totalUsage: TokenUsage;
 }
+

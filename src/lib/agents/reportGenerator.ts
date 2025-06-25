@@ -1,7 +1,9 @@
-import { Learning, ResearchReport, TokenUsage } from '@/lib/types';
+import { Learning, ResearchReport, TokenUsage, SupportedModel } from '@/lib/types';
 import { generateObject } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
+import { getModelProvider } from '@/lib/models';
+
 
 // Zod schema for the final report structure, ensuring type-safe AI output
 const ReportSchema = z.object({
@@ -42,9 +44,11 @@ Based ONLY on the information in the provided sources, generate a report that di
 export async function generateReport({
   learnings,
   query,
+  model,
 }: {
   learnings: Learning[];
   query: string;
+  model: SupportedModel;
 }): Promise<{ report: ResearchReport; usage: TokenUsage }> {
   console.log(`REPORT_GENERATION_START: Synthesizing ${learnings.length} learnings for query "${query}"`);
 
@@ -52,7 +56,7 @@ export async function generateReport({
   const systemPrompt = generateReportSystemPrompt(learnings, query);
 
   const { object, usage: modelUsage } = await generateObject({
-    model: openai('gpt-4o-mini'),
+    model: getModelProvider(model), //openai('gpt-4o-mini'),
     schema: ReportSchema,
     prompt: systemPrompt,
   });

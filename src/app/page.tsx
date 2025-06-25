@@ -1,103 +1,102 @@
-import Image from "next/image";
+'use client';
+
+import { useState } from 'react';
+import { ResearchReport, SupportedModel } from '@/lib/types';
+import { ResearchForm } from '@/components/ResearchForm';
+import { StatusWindow } from '@/components/StatusWindow';
+import { ReportDisplay } from '@/components/ReportDisplay';
+import { ChatInterface } from '@/components/ChatInterface';
+import { Github, Sparkles } from 'lucide-react';
+
+type AppState = 'IDLE' | 'SEARCHING' | 'REPORT_READY';
+interface StatusMessage { type: string; data: any; }
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [appState, setAppState] = useState<AppState>('IDLE');
+  const [statusMessages, setStatusMessages] = useState<StatusMessage[]>([]);
+  const [finalReport, setFinalReport] = useState<ResearchReport | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+  const handleResearchSubmit = async (formData: { query: string; depth: number; breadth: number; model: SupportedModel }) => {
+    setAppState('SEARCHING');
+    setStatusMessages([]);
+    setFinalReport(null);
+
+    const response = await fetch('/api/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initialQuery: formData.query, ...formData }),
+    });
+
+    if (!response.body) return;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const json = JSON.parse(line.substring(6));
+            if(json.type === 'report') setFinalReport(json.data.report);
+            if (json.type === 'done') {
+                setAppState('REPORT_READY');
+                return;
+            }
+            setStatusMessages(prev => [...prev, json]);
+          } catch (e) {
+            console.error('Failed to parse stream chunk:', e);
+          }
+        }
+      }
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-white text-gray-900 font-sans">
+      <div className="container mx-auto px-4 py-8 flex flex-col items-center">
+        <header className="text-center mb-10">
+          <h1 className="text-5xl font-extrabold tracking-tight flex items-center gap-3">
+            <Sparkles className="h-10 w-10 text-blue-600" />
+            <span>Autonomous Research Engine</span>
+          </h1>
+          <p className="text-gray-500 mt-2 text-lg">
+            Your AI-powered copilot for turning complex topics into structured reports.
+          </p>
+        </header>
+
+        {appState === 'IDLE' && (
+          <ResearchForm onSubmit={handleResearchSubmit} isLoading={false} />
+        )}
+        
+        {appState === 'SEARCHING' && (
+          <>
+            <ResearchForm onSubmit={handleResearchSubmit} isLoading={true} />
+            <div className="mt-8 w-full">
+              <StatusWindow messages={statusMessages} />
+            </div>
+          </>
+        )}
+        
+        {appState === 'REPORT_READY' && finalReport && (
+          <div className="w-full flex flex-col items-center gap-8">
+            <ReportDisplay report={finalReport} />
+            <ChatInterface report={finalReport} />
+          </div>
+        )}
+
+        <footer className="text-center mt-12 text-gray-500">
+            <a href="https://github.com/your-repo" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 hover:text-blue-600 transition-colors">
+                <Github className="h-4 w-4"/> View on GitHub
+            </a>
+        </footer>
+      </div>
+    </main>
   );
 }
