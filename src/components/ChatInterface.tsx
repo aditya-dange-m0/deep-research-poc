@@ -1,57 +1,74 @@
 'use client';
 
-// --- FIX: Import useMemo from React ---
-import { useMemo } from 'react';
-import { useChat } from 'ai/react';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+import { useEffect, useRef } from 'react';
+import { Message } from 'ai/react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, User, Bot } from 'lucide-react';
-import { ResearchReport } from '@/lib/types';
+import { Send, User, Bot, Loader2 } from 'lucide-react';
 
-export function ChatInterface({ report }: { report: ResearchReport }) {
-  // --- FIX: Memoize the body object so it's stable across re-renders ---
-  const chatBody = useMemo(() => {
-    return { reportContext: JSON.stringify(report) };
-  }, [report]); // This will only re-create the object if the report prop changes
+interface ChatInterfaceProps {
+  messages: Message[];
+  input: string;
+  handleInputChange: (e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLTextAreaElement>) => void;
+  handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+  isLoading: boolean;
+}
 
-  const { messages, input, handleInputChange, handleSubmit } = useChat({
-    api: '/api/chat',
-    // --- FIX: Use the stable, memoized body object ---
-    body: chatBody,
-  });
+export function ChatInterface({ 
+  messages,
+  input,
+  handleInputChange,
+  handleSubmit,
+  isLoading
+}: ChatInterfaceProps) {
+  
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTo({
+        top: scrollAreaRef.current.scrollHeight,
+        behavior: 'auto',
+      });
+    }
+  }, [messages]);
 
   return (
-    <Card className="w-full max-w-3xl mx-auto mt-8 animate-in fade-in duration-500">
-      <CardHeader>
-        <CardTitle>Ask About The Report</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-64 pr-4">
-          {messages.map(m => (
-            <div key={m.id} className={`flex gap-3 my-4 text-sm ${m.role === 'user' ? 'justify-end' : ''}`}>
-              {m.role === 'assistant' && <Bot className="w-6 h-6 text-blue-600 flex-shrink-0" />}
-              <div className={`p-3 rounded-lg ${m.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
-                <p className="leading-relaxed">{m.content}</p>
-              </div>
-              {m.role === 'user' && <User className="w-6 h-6 flex-shrink-0" />}
+    // This component no longer needs its own Card wrapper
+    <div className="w-full flex flex-col h-96">
+        <ScrollArea className="flex-grow pr-4 mb-4">
+            <div ref={scrollAreaRef} className="h-full">
+                {messages.map(m => (
+                <div key={m.id} className={`flex gap-3 my-4 text-sm ${m.role === 'user' ? 'justify-end' : ''}`}>
+                    {m.role === 'assistant' && <Bot className="w-6 h-6 text-blue-600 flex-shrink-0" />}
+                    <div className={`p-3 rounded-lg ${m.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}>
+                    <div className="prose prose-sm max-w-none text-inherit">{m.content}</div>
+                    </div>
+                    {m.role === 'user' && <User className="w-6 h-6 flex-shrink-0" />}
+                </div>
+                ))}
+                {isLoading && (
+                <div className="flex gap-3 my-4 text-sm">
+                    <Bot className="w-6 h-6 text-blue-600 flex-shrink-0 animate-pulse" />
+                    <div className="p-3 rounded-lg bg-gray-100 flex items-center">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    </div>
+                </div>
+                )}
             </div>
-          ))}
         </ScrollArea>
-      </CardContent>
-      <CardFooter>
         <form onSubmit={handleSubmit} className="flex items-center gap-2 w-full">
             <Input
               value={input}
               onChange={handleInputChange}
-              placeholder="e.g., Elaborate on the first section..."
+              placeholder="Elaborate on a section..."
+              disabled={isLoading}
             />
-            <Button type="submit" size="icon">
+            <Button type="submit" size="icon" disabled={!input || isLoading}>
                 <Send className="h-4 w-4" />
             </Button>
         </form>
-      </CardFooter>
-    </Card>
+    </div>
   );
 }

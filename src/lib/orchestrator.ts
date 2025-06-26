@@ -146,7 +146,7 @@ async function deepResearch({
           aggregatedFollowUpQuestions.push(...learning.followUpQuestions);
         }
         // Break to move to the next sub-query after finding one good source
-        break; 
+        break;
       }
     }
 
