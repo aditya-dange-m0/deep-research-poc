@@ -118,12 +118,14 @@ export async function searchAndEvaluate({
   query,
   existingUrls,
   model,
+  searchProvider
 }: {
   query: string;
   existingUrls: string[];
   model: SupportedModel;
+  searchProvider: 'google' | 'exa'
 }): Promise<{ relevantResults: SearchResult[]; usage: TokenUsage }> {
-  const searchResults = await performSearch(query);
+  const searchResults = await performSearch(query,searchProvider);
   if (searchResults.length === 0) {
     return { relevantResults: [], usage: { inputTokens: 0, outputTokens: 0 } };
   }

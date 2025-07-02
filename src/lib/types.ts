@@ -12,19 +12,57 @@ export const supportedModels = [
 ] as const;
 export type SupportedModel = (typeof supportedModels)[number];
 
-// --- VERIFIED: Input validation schema is correct ---
-export const ResearchRequestSchema = z.object({
+// export interface FactCheckReport {
+//   verdict: 'True' | 'Mostly True' | 'Misleading' | 'False' | 'Unverifiable';
+//   summary: string;
+//   supportingEvidence: string[];
+//   refutingEvidence: string[];
+// }
+
+// // --- VERIFIED: Input validation schema is correct ---
+// export const ResearchRequestSchema = z.object({
+//   initialQuery: z.string().min(1, "Query cannot be empty."),
+//   taskType: z.enum(["research", "fact-check"]), // Add this
+//   depth: z.number().int().min(1, "Depth must be at least 1."),
+//   breadth: z.number().int().min(1, "Breadth must be at least 1."),
+//   model: z
+//     .enum(supportedModels)
+//     .optional()
+//     .describe("The AI model to use for generation."),
+// });
+const ResearchTaskSchema = z.object({
   initialQuery: z.string().min(1, "Query cannot be empty."),
-  depth: z.number().int().min(1, "Depth must be at least 1."),
-  breadth: z.number().int().min(1, "Breadth must be at least 1."),
-  model: z
-    .enum(supportedModels)
-    .optional()
-    .describe("The AI model to use for generation."),
+  taskType: z.literal('research'),
+  depth: z.number().int().min(1, "Depth is required for research tasks."),
+  breadth: z.number().int().min(1, "Breadth is required for research tasks."),
+  model: z.enum(supportedModels).optional(),
+  searchProvider: z.enum(['google', 'exa'])
 });
+
+// Schema for when the user selects "Fact-Check"
+const FactCheckTaskSchema = z.object({
+  initialQuery: z.string().min(1, "Claim cannot be empty."),
+  taskType: z.literal('fact-check'),
+  searchProvider: z.enum(['google', 'exa']),
+  // depth and breadth are not needed for fact-checking
+  model: z.enum(supportedModels).optional(),
+});
+
+// Combine them using a discriminated union on the 'taskType' field
+export const ResearchRequestSchema = z.discriminatedUnion('taskType', [
+  ResearchTaskSchema,
+  FactCheckTaskSchema,
+]);
+
 
 export type ResearchRequestBody = z.infer<typeof ResearchRequestSchema>;
 
+export interface FactCheckReport {
+  verdict: 'True' | 'Mostly True' | 'Misleading' | 'False' | 'Unverifiable';
+  summary: string;
+  supportingEvidence: string[];
+  refutingEvidence: string[];
+}
 // --- Module-specific Interfaces ---
 
 // 1. Query Interpreter Output
@@ -64,6 +102,7 @@ export interface Document {
 export interface Learning {
   query: string;
   url: string;
+  isRelevant: boolean;
   learning: string; // 1–2 sentences
   followUpQuestions: string[]; // 1–3 items
 }

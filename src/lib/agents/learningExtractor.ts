@@ -7,15 +7,20 @@ import { getModelProvider } from "@/lib/models";
 // This schema should be defined once, preferably at the top level
 // or within the module where it's used.
 const LearningSchema = z.object({
+  isRelevant: z
+    .boolean()
+    .describe(
+      "Is the document content directly relevant and useful for answering the original query?"
+    ),
   learning: z
     .string()
     .describe(
-      "A concise insight of 1-2 sentences summarizing the most important information in the document related to the original query."
+      "If relevant, a concise 1-2 sentence insight. If not, a brief explanation of why it's irrelevant."
     ),
   followUpQuestions: z
     .array(z.string())
     .describe(
-      "1 to 3 novel, open-ended questions for further research that arise from the document's content."
+      "If relevant, 1-3 novel questions for further research. If not, an empty array."
     ),
 });
 
@@ -99,6 +104,7 @@ Based on the "Original Research Query" and "Document Content", generate the JSON
   const learning: Learning = {
     query: query,
     url: document.metadata.url,
+    isRelevant: object.isRelevant,
     learning: object.learning,
     followUpQuestions: object.followUpQuestions,
   };
@@ -109,13 +115,37 @@ Based on the "Original Research Query" and "Document Content", generate the JSON
     outputTokens: modelUsage.completionTokens,
   };
 
-  // Log the generated learning for debugging and tracking
   console.log(
     `LEARNING_GENERATED: url=${learning.url}, Input tokens: ${usage.inputTokens}, Output tokens: ${usage.outputTokens}`
   );
-
+  // Log the generated learning for debugging and tracking
+  if (object.isRelevant) {
+    const learning: Learning = {
+      query: query,
+      url: document.metadata.url,
+      isRelevant: object.isRelevant,
+      learning: object.learning,
+      followUpQuestions: object.followUpQuestions,
+    };
+    console.log(`LEARNING_EXTRACTED from ${document.metadata.url}`);
+    return { learning, usage };
+  } else {
+    console.log(
+      `DOCUMENT_IRRELEVANT: ${document.metadata.url}. Reason: ${object.learning}`
+    );
+    return {
+      learning: {
+        query: query,
+        url: document.metadata.url,
+        isRelevant: object.isRelevant,
+        learning: object.learning,
+        followUpQuestions: object.followUpQuestions,
+      },
+      usage,
+    };
+  }
   // Return the extracted learning and token usage
-  return { learning, usage };
+  // return { learning, usage };
 }
 
 // import { Document, Learning, TokenUsage, SupportedModel } from '@/lib/types';

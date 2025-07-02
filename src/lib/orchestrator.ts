@@ -10,6 +10,8 @@ import { searchAndEvaluate } from "./agents/searchAndEvaluate";
 import { fetchAndParseContent } from "./agents/contentFetcher";
 import { extractLearning } from "./agents/learningExtractor";
 import { generateReport } from "./agents/reportGenerator";
+import { deconstructClaim } from "./agents/claimDeconstructor";
+import { renderVerdict } from "./agents/synthesisAndVerdict";
 
 // --- FIX #1: Add 'initialQuery' to the ResearchState type ---
 type ResearchState = {
@@ -19,6 +21,87 @@ type ResearchState = {
   tokenTracker: TokenUsage;
   approvedUrls: Set<string>;
 };
+
+async function factCheckWorkflow({
+  claim,
+  model,
+  searchProvider,
+  onData,
+}: {
+  claim: string;
+  model: SupportedModel;
+  searchProvider: "google" | "exa";
+  onData: (data: any) => void;
+}) {
+  const state: ResearchState = {
+    initialQuery: claim,
+    completedQueries: new Set(),
+    allLearnings: [],
+    tokenTracker: { inputTokens: 0, outputTokens: 0 },
+    approvedUrls: new Set(),
+  };
+
+  onData({ type: "query-start", data: `Deconstructing claim: "${claim}"` });
+  const { queries, usage: deconstructUsage } = await deconstructClaim({
+    claim,
+    model,
+  });
+  state.tokenTracker.inputTokens += deconstructUsage.inputTokens;
+  state.tokenTracker.outputTokens += deconstructUsage.outputTokens;
+  onData({
+    type: "token-usage",
+    data: { step: "deconstruct-claim", usage: deconstructUsage },
+  });
+
+  for (const query of queries) {
+    state.completedQueries.add(query);
+    const { relevantResults, usage: evalUsage } = await searchAndEvaluate({
+      query,
+      existingUrls: Array.from(state.approvedUrls),
+      model,
+      searchProvider,
+    });
+    state.tokenTracker.inputTokens += evalUsage.inputTokens;
+    state.tokenTracker.outputTokens += evalUsage.outputTokens;
+
+    // Find one good source per query to gather evidence
+    for (const result of relevantResults) {
+      if (state.approvedUrls.has(result.url)) continue;
+      const document = await fetchAndParseContent(result);
+      if (document) {
+        state.approvedUrls.add(result.url);
+        const { learning, usage: learnUsage } = await extractLearning({
+          query,
+          document,
+          model,
+        });
+        state.allLearnings.push(learning);
+        onData({ type: "learning", data: { learning, usage: learnUsage } });
+        break;
+      }
+    }
+  }
+
+  if (state.allLearnings.length > 0) {
+    onData({ type: "report", data: "Synthesizing verdict..." });
+    const { report, usage: verdictUsage } = await renderVerdict({
+      claim,
+      learnings: state.allLearnings,
+      model,
+    });
+    state.tokenTracker.inputTokens += verdictUsage.inputTokens;
+    state.tokenTracker.outputTokens += verdictUsage.outputTokens;
+    onData({
+      type: "fact-check-report",  
+      data: { report, usage: verdictUsage },
+    });
+  } else {
+    onData({
+      type: "error",
+      data: "Could not find enough information to verify the claim.",
+    });
+  }
+}
 
 // --- FIX #3: Define the missing 'createContextualPrompt' function ---
 function createContextualPrompt(
@@ -60,6 +143,127 @@ Generate a list of specific, focused, and actionable search engine queries. Thes
 }
 
 // Renamed to 'deepResearch' for clarity, was 'recursiveOrchestrator'
+// async function deepResearch({
+//   prompt,
+//   depth,
+//   breadth,
+//   model,
+//   searchProvider,
+//   onData,
+//   state,
+// }: {
+//   prompt: string;
+//   depth: number;
+//   breadth: number;
+//   model: SupportedModel;
+//   searchProvider: "google" | "exa";
+//   onData: (data: any) => void;
+//   state: ResearchState;
+// }) {
+//   if (depth === 0) {
+//     console.log("REACHED MAX DEPTH");
+//     return;
+//   }
+
+//   onData({ type: "query-start", data: prompt });
+
+//   const { queries: subQueries, usage: subQueryUsage } =
+//     await generateSubQueries({ query: prompt, breadth, model });
+//   state.tokenTracker.inputTokens += subQueryUsage.inputTokens;
+//   state.tokenTracker.outputTokens += subQueryUsage.outputTokens;
+//   onData({
+//     type: "token-usage",
+//     data: { step: "sub-query", usage: subQueryUsage },
+//   });
+
+//   // Declare the array to collect follow-up questions for this batch of sub-queries
+//   const aggregatedFollowUpQuestions: string[] = [];
+
+//   for (const subQuery of subQueries) {
+//     if (state.completedQueries.has(subQuery)) continue;
+//     state.completedQueries.add(subQuery);
+
+//     const learningsBeforeSubQuery = state.allLearnings.length;
+
+//     const { refinedQuery, usage: refinerUsage } = await refineQuery({
+//       initialQuery: state.initialQuery,
+//       subQuery,
+//       model,
+//     });
+//     state.tokenTracker.inputTokens += refinerUsage.inputTokens;
+//     state.tokenTracker.outputTokens += refinerUsage.outputTokens;
+//     onData({
+//       type: "refining-query",
+//       data: { query: refinedQuery, usage: refinerUsage },
+//     });
+
+//     const { relevantResults, usage: evaluationUsage } = await searchAndEvaluate(
+//       {
+//         query: refinedQuery,
+//         existingUrls: Array.from(state.approvedUrls),
+//         model,
+//         searchProvider,
+//       }
+//     );
+
+//     state.tokenTracker.inputTokens += evaluationUsage.inputTokens;
+//     state.tokenTracker.outputTokens += evaluationUsage.outputTokens;
+//     onData({ type: "relevance-check", data: { usage: evaluationUsage } });
+
+//     for (const result of relevantResults) {
+//       if (state.approvedUrls.has(result.url)) continue;
+
+//       const document = await fetchAndParseContent(result);
+//       if (document) {
+//         state.approvedUrls.add(document.metadata.url);
+
+//         const { learning, usage: learningUsage } = await extractLearning({
+//           query: subQuery,
+//           document,
+//           model,
+//         });
+//         state.allLearnings.push(learning);
+//         onData({ type: "learning", data: { learning, usage: learningUsage } });
+
+//         if (
+//           learning.followUpQuestions &&
+//           learning.followUpQuestions.length > 0
+//         ) {
+//           aggregatedFollowUpQuestions.push(...learning.followUpQuestions);
+//         }
+//         // Break to move to the next sub-query after finding one good source
+//         break;
+//       }
+//     }
+
+//     // After processing results for a sub-query, if there are follow-up questions, recurse.
+//     if (depth > 1 && aggregatedFollowUpQuestions.length > 0) {
+//       // Remove duplicates from aggregated follow-up questions
+//       const uniqueFollowUpQuestions = [...new Set(aggregatedFollowUpQuestions)];
+//       const newPromptForRecursion = createContextualPrompt(
+//         state,
+//         uniqueFollowUpQuestions
+//       );
+//       await deepResearch({
+//         prompt: newPromptForRecursion,
+//         depth: depth - 1,
+//         breadth: Math.ceil(breadth / 2), // Consider if breadth needs adjustment based on # of follow-ups
+//         model,
+//         searchProvider,
+//         onData,
+//         state,
+//       });
+//     }
+
+//     // Log if a sub-query (and its potential recursive calls) did not yield new learnings
+//     if (state.allLearnings.length === learningsBeforeSubQuery) {
+//       console.log(
+//         `ORCHESTRATOR_INFO: Sub-query "${subQuery}" and its recursive calls did not yield new learnings. Initial query context: "${state.initialQuery}"`
+//       );
+//     }
+//   }
+// }
+
 async function deepResearch({
   prompt,
   depth,
@@ -67,6 +271,7 @@ async function deepResearch({
   model,
   onData,
   state,
+  searchProvider, // <-- ADD this parameter
 }: {
   prompt: string;
   depth: number;
@@ -74,6 +279,7 @@ async function deepResearch({
   model: SupportedModel;
   onData: (data: any) => void;
   state: ResearchState;
+  searchProvider: 'google' | 'exa'; // <-- ADD this parameter
 }) {
   if (depth === 0) {
     console.log("REACHED MAX DEPTH");
@@ -91,7 +297,6 @@ async function deepResearch({
     data: { step: "sub-query", usage: subQueryUsage },
   });
 
-  // Declare the array to collect follow-up questions for this batch of sub-queries
   const aggregatedFollowUpQuestions: string[] = [];
 
   for (const subQuery of subQueries) {
@@ -112,11 +317,13 @@ async function deepResearch({
       data: { query: refinedQuery, usage: refinerUsage },
     });
 
+    // --- FIX: Pass the searchProvider down to the agent ---
     const { relevantResults, usage: evaluationUsage } = await searchAndEvaluate(
       {
         query: refinedQuery,
         existingUrls: Array.from(state.approvedUrls),
         model,
+        searchProvider, // Pass the user's choice here
       }
     );
 
@@ -136,7 +343,7 @@ async function deepResearch({
           document,
           model,
         });
-        state.allLearnings.push(learning);
+        state.allLearnings.push(learning); // This is now correctly a Learning object
         onData({ type: "learning", data: { learning, usage: learningUsage } });
 
         if (
@@ -145,95 +352,94 @@ async function deepResearch({
         ) {
           aggregatedFollowUpQuestions.push(...learning.followUpQuestions);
         }
-        // Break to move to the next sub-query after finding one good source
         break;
       }
     }
-
-    // After processing results for a sub-query, if there are follow-up questions, recurse.
-    if (depth > 1 && aggregatedFollowUpQuestions.length > 0) {
-      // Remove duplicates from aggregated follow-up questions
-      const uniqueFollowUpQuestions = [...new Set(aggregatedFollowUpQuestions)];
-      const newPromptForRecursion = createContextualPrompt(
-        state,
-        uniqueFollowUpQuestions
-      );
-      await deepResearch({
-        prompt: newPromptForRecursion,
-        depth: depth - 1,
-        breadth: Math.ceil(breadth / 2), // Consider if breadth needs adjustment based on # of follow-ups
-        model,
-        onData,
-        state,
-      });
-    }
-
-    // Log if a sub-query (and its potential recursive calls) did not yield new learnings
-    if (state.allLearnings.length === learningsBeforeSubQuery) {
-      console.log(
-        `ORCHESTRATOR_INFO: Sub-query "${subQuery}" and its recursive calls did not yield new learnings. Initial query context: "${state.initialQuery}"`
-      );
-    }
+  }
+  
+  // --- LOGIC FIX: The recursive call now happens AFTER the for-loop has completed ---
+  if (depth > 1 && aggregatedFollowUpQuestions.length > 0) {
+    const uniqueFollowUpQuestions = [...new Set(aggregatedFollowUpQuestions)];
+    const newPromptForRecursion = createContextualPrompt(
+      state,
+      uniqueFollowUpQuestions
+    );
+    await deepResearch({
+      prompt: newPromptForRecursion,
+      depth: depth - 1,
+      breadth: Math.ceil(breadth / 2),
+      model,
+      onData,
+      state,
+      searchProvider, // Pass the provider down in recursion
+    });
   }
 }
 
 export async function startResearch(
-  {
-    initialQuery,
-    depth,
-    breadth,
-    model,
-  }: {
-    initialQuery: string;
-    depth: number;
-    breadth: number;
-    model: SupportedModel;
-  },
+  requestBody: ResearchRequestBody & { model: SupportedModel },
   onData: (data: any) => void
 ) {
   // Initialize the state correctly, including the initialQuery
-  const state: ResearchState = {
-    initialQuery: initialQuery,
-    completedQueries: new Set<string>(),
-    allLearnings: [],
-    tokenTracker: { inputTokens: 0, outputTokens: 0 },
-    approvedUrls: new Set<string>(),
-  };
-
-  await deepResearch({
-    prompt: initialQuery,
-    depth: depth,
-    breadth: breadth,
-    model,
-    onData,
-    state,
-  });
-
-  // This block will now execute because learnings will be found.
-  if (state.allLearnings.length > 0) {
-    const { report, usage: reportUsage } = await generateReport({
-      learnings: state.allLearnings,
-      query: initialQuery,
-      model,
+  if (requestBody.taskType === "fact-check") {
+    // --- Call the fact-checking workflow ---
+    await factCheckWorkflow({
+      claim: requestBody.initialQuery,
+      model: requestBody.model,
+      searchProvider: requestBody.searchProvider,
+      onData,
     });
-    state.tokenTracker.inputTokens += reportUsage.inputTokens;
-    state.tokenTracker.outputTokens += reportUsage.outputTokens;
-    onData({ type: "report", data: { report, usage: reportUsage } });
   } else {
-    onData({
-      type: "error",
-      data: "Research concluded, but no relevant learnings were found to generate a report.",
+    // --- Call your existing deep research workflow ---
+    const state: ResearchState = {
+      initialQuery: requestBody.initialQuery,
+      completedQueries: new Set<string>(),
+      allLearnings: [],
+      tokenTracker: { inputTokens: 0, outputTokens: 0 },
+      approvedUrls: new Set<string>(),
+    };
+
+    await deepResearch({
+      prompt: requestBody.initialQuery,
+      depth: requestBody.depth || 2,
+      breadth: requestBody.breadth || 3,
+      model: requestBody.model,
+      searchProvider: requestBody.searchProvider,
+      onData,
+      state,
     });
+
+    if (state.allLearnings.length > 0) {
+      const { report, usage: reportUsage } = await generateReport({
+        learnings: state.allLearnings,
+        query: requestBody.initialQuery,
+        model: requestBody.model,
+      });
+      state.tokenTracker.inputTokens += reportUsage.inputTokens;
+      state.tokenTracker.outputTokens += reportUsage.outputTokens;
+      onData({ type: "report", data: { report, usage: reportUsage } });
+    } else {
+      onData({
+        type: "error",
+        data: "Research concluded, but no relevant learnings were found to generate a report.",
+      });
+    }
   }
 
+  // The 'done' message is now sent once at the end, regardless of the path taken.
   onData({
     type: "done",
     data: {
-      message: "Research complete.",
-      totalUsage: state.tokenTracker,
+      message: "Task complete.",
+      // Note: A more advanced implementation would return totalUsage from each workflow.
+      // For now, this signals completion.
+      totalUsage: { inputTokens: 0, outputTokens: 0 }, // Placeholder, can be refined.
     },
   });
 }
+
+// Actually I have researched about E2B and they only provide CPU code runtime and it would be quite expensive to generate and run code on E2B sandbox.
+// And Modal Needs Constand Debugging during code generation and E2B don't provide any kind of functionality related to this.
 
 // import { Learning, ResearchRequestBody, TokenUsage, SupportedModel } from '@/lib/types';
 // import { generateSubQueries } from './subQueryGenerator';
