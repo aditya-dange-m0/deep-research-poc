@@ -69,7 +69,7 @@ export async function POST(req: Request) {
     }
 
     // 3. Gather Full Tool Definitions & Check Connections
-    let fetchedComposioTools: ToolSet[] = [];
+    let fetchedComposioTools: ToolSet = {};
     const appsNeedingConnection: string[] = [];
     const connectedAppsData: { appName: string; connectedAccountId: string; }[] = [];
 
@@ -142,7 +142,7 @@ export async function POST(req: Request) {
       if (toolsToFetchForApp.length > 0) {
         
         // Fetch full tool definitions using getComposioTool
-        fetchedComposioTools = await getComposioTool(toolsToFetchForApp) as ToolSet[];
+        fetchedComposioTools = await getComposioTool(toolsToFetchForApp) as ToolSet;
         console.log(fetchedComposioTools)
         // Composio's getTools returns an array of objects. We need to format them for AI SDK/OpenAI.
         // Ensure that `tool.parameters` is the direct JSON schema object.
@@ -161,62 +161,78 @@ export async function POST(req: Request) {
     //   return NextResponse.json({ response: responseMessage, requiredConnections: appsNeedingConnection }, { status: 200 });
     // }
 
-    if (fetchedComposioTools.length === 0) {
+    // Check if there are any tools by inspecting the keys of the object
+    const hasTools = Object.keys(fetchedComposioTools).length > 0;
+    console.log("hasTools ::::",hasTools)
+    if (!hasTools) { // Use the hasTools boolean
       return NextResponse.json({ response: "I couldn't find any relevant tools for your request that are currently connected." }, { status: 200 });
     }
 
     // console.log(`  Final tools prepared for Agent LLM: ${fetchedComposioTools.map(t => t.description).join(', ')}`);
 
     // 4. Tool-Calling LLM Decision & Execution (using Vercel AI SDK with maxSteps)
-    const messages: CoreMessage[] = [
-      { role: 'system', content: 'You are a helpful AI assistant with access to various tools. Your goal is to accurately understand the user\'s request, decide if a tool is necessary, and call the appropriate tool(s) with correct parameters. If multiple tools are needed, call them sequentially or in parallel as appropriate. After tool execution, provide a concise and helpful natural language response to the user, summarizing the outcome.' },
-    ];
+// Define the enhanced system instruction and prompt structure
+const enhancedPrompt = `You are a highly capable AI assistant designed to understand user requests, utilize available tools efficiently, and provide concise, helpful responses.
+
+**Your Task:**
+1.  **Analyze the User's Request:** Carefully understand the intent and requirements of the user's query.
+2.  **Tool Selection (if necessary):** Determine if any of the provided tools are needed to fulfill the request. If so, select the appropriate tool(s).
+3.  **Tool Execution:** Call the chosen tool(s) with the correct parameters. If multiple tools are required, execute them sequentially or in parallel as appropriate for the task.
+4.  **Response Generation:** After tool execution (or if no tool is needed), synthesize the information and provide a clear, concise, and helpful natural language response to the user, summarizing the outcome or directly answering their query.
+
+---
+
+**Original User Query:** "${userQuery}"`; // Integrates userQuery directly into the prompt
+
+    console.log("fetchedComposioTools ::::",fetchedComposioTools)
+    console.log("Before reduce - fetchedComposioTools content:", fetchedComposioTools);
+    console.log("Before reduce - Is fetchedComposioTools an array?", Array.isArray(fetchedComposioTools));
 
     // Call generateText ONCE, letting it manage the multi-step process with maxSteps
     const currentLlmResponse = await generateText({
       model: openai(AGENT_LLM_MODEL),
-      prompt: userQuery, // Initial messages
-      tools: fetchedComposioTools.length > 0 ? fetchedComposioTools[0] : undefined,
-      toolChoice:fetchedComposioTools.length > 0 ? 'auto' : 'none',
+      prompt: enhancedPrompt, // Pass the enhanced prompt string
+      tools: hasTools ? fetchedComposioTools : undefined,
+      toolChoice: 'auto',
       temperature: 0.5,
       maxSteps: MAX_AGENT_STEPS, // This is where the magic happens!
     });
-
+    // const currentLlmResponse = "Hi"
     // 5. Final Response Generation (after maxSteps has completed its internal loop)
-    let finalAgentResponse: string;
-    // Placeholder for executed tools log; populate as needed
-    const executedToolsLog: { name: string; output: any; }[] = [];
+    // let finalAgentResponse: string;
+    // // Placeholder for executed tools log; populate as needed
+    // const executedToolsLog: { name: string; output: any; }[] = [];
 
-    if (currentLlmResponse.text) {
-      finalAgentResponse = currentLlmResponse.text;
-    } else if (currentLlmResponse.toolCalls && currentLlmResponse.toolCalls.length > 0) {
-      // This means maxSteps was reached while the LLM was still trying to call tools.
-      // We need to inform the user or try to get a summary from the LLM.
-      console.warn(`  Max steps (${MAX_AGENT_STEPS}) reached while LLM was still making tool calls.`);
+    // if (currentLlmResponse.text) {
+    //   finalAgentResponse = currentLlmResponse.text;
+    // } else if (currentLlmResponse.toolCalls && currentLlmResponse.toolCalls.length > 0) {
+    //   // This means maxSteps was reached while the LLM was still trying to call tools.
+    //   // We need to inform the user or try to get a summary from the LLM.
+    //   console.warn(`  Max steps (${MAX_AGENT_STEPS}) reached while LLM was still making tool calls.`);
       
-      // Optionally, make one final LLM call to summarize based on the `messages` history
-      // which `generateText` internally updated with tool outputs up to `maxSteps`.
-      const finalSummaryMessages: CoreMessage[] = [...messages, {
-        role: 'assistant',
-        content: `I reached my maximum processing steps. The last tool calls were: ${currentLlmResponse.toolCalls.map(tc => tc.toolName).join(', ')}. tool_calls: ${currentLlmResponse.toolCalls}`,
-      }];
-      const finalCompletion = await generateText({
-        model: openai(AGENT_LLM_MODEL),
-        messages: finalSummaryMessages,
-        temperature: 0.7,
-      });
-      finalAgentResponse = finalCompletion.text || "I was processing your request, but hit a limit. Please check the logs for more details or try rephrasing your request.";
+    //   // Optionally, make one final LLM call to summarize based on the `messages` history
+    //   // which `generateText` internally updated with tool outputs up to `maxSteps`.
+    //   const finalSummaryMessages: CoreMessage[] = [...messages, {
+    //     role: 'assistant',
+    //     content: `I reached my maximum processing steps. The last tool calls were: ${currentLlmResponse.toolCalls.map(tc => tc.toolName).join(', ')}. tool_calls: ${currentLlmResponse.toolCalls}`,
+    //   }];
+    //   const finalCompletion = await generateText({
+    //     model: openai(AGENT_LLM_MODEL),
+    //     messages: finalSummaryMessages,
+    //     temperature: 0.7,
+    //   });
+    //   finalAgentResponse = finalCompletion.text || "I was processing your request, but hit a limit. Please check the logs for more details or try rephrasing your request.";
 
-    } else {
-      // Fallback if LLM didn't produce text and no tool calls were made (unlikely with 'auto' tool_choice)
-      finalAgentResponse = "I have processed your request, but cannot provide a detailed summary at this moment.";
-    }
+    // } else {
+    //   // Fallback if LLM didn't produce text and no tool calls were made (unlikely with 'auto' tool_choice)
+    //   finalAgentResponse = "I have processed your request, but cannot provide a detailed summary at this moment.";
+    // }
 
-    console.log(`--- Final Agent Response ---`);
-    console.log(finalAgentResponse);
+    // console.log(`--- Final Agent Response ---`);
+    // console.log(finalAgentResponse);
 
     return NextResponse.json(
-      { response: finalAgentResponse, executedTools: executedToolsLog },
+      { response: currentLlmResponse },
       { status: 200 }
     );
   } catch (error: any) {
