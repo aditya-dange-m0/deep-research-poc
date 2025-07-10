@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(validatedBody.error.format(), { status: 400 });
     }
     
-    const { initialQuery, depth, breadth, model } = validatedBody.data;
+    const { initialQuery, depth, breadth, model } = validatedBody.data as { initialQuery: string; depth: number; breadth: number; model?: SupportedModel };
 
     const modelToUse: SupportedModel = model || 'google:gemini-1.5-flash-latest';
 
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
         };
         
         try {
-          await startResearch({ initialQuery, depth, breadth, model: modelToUse }, onData);
+          await startResearch({ taskType: "research", initialQuery, depth, breadth, model: modelToUse, searchProvider: "google" }, onData);
         } catch (error: any) {
             console.error("Orchestration error in stream:", error);
             const errorMessage = { type: 'error', data: error.message || 'An internal error occurred during orchestration.' };

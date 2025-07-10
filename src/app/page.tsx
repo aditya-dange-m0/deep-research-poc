@@ -245,6 +245,10 @@ import { FactCheckDisplay } from "@/components/FactCheckDisplay";
 import { TranslationDisplay } from "@/components/TranslationDisplay";
 import { ChatInterface } from "@/components/ChatInterface";
 import { WindowWrapper } from "@/components/WindowWrapper";
+import Link from 'next/link';
+import { Button } from "@/components/ui/button";
+import { ArrowRight } from "lucide-react";
+
 import {
   Github,
   Sparkles,
@@ -444,6 +448,16 @@ export default function Home() {
             Your copilot for research, fact-checking, and translation.
           </p>
         </header>
+        {/* --- NEW: Redirection Button to Super Agent --- */}
+          <div className="mt-4">
+            <Link href="/agent" passHref>
+              <Button variant="outline" className="text-lg py-6 px-8 border-2 border-blue-500 text-blue-600 hover:bg-blue-50 hover:text-blue-700">
+                Switch to Genspark Super Agent
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
+            </Link>
+          </div>
+          {/* --- END OF NEW SECTION --- */}
 
         <WindowWrapper
           title="Configure Task"
