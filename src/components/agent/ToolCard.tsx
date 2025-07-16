@@ -10,6 +10,8 @@ interface Tool {
   description: string
   icon: string
   isInstalled: boolean
+  connectionStatus?: 'INITIATED' | 'ACTIVE' | 'INACTIVE' | null;
+  connectedAccountId?: string;
 }
 
 interface ToolCardProps {
@@ -26,6 +28,28 @@ export function ToolCard({ tool, onInstall, isInstalling }: ToolCardProps) {
       .join("")
       .toUpperCase()
       .slice(0, 2)
+  }
+
+  const getConnectionStatusColor = (status: string | undefined | null) => {
+    switch (status) {
+      case 'ACTIVE':
+        return 'bg-green-50 text-green-700 border-green-200';
+      case 'INITIATED':
+        return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+      default:
+        return 'bg-blue-600 hover:bg-blue-700 text-white';
+    }
+  }
+
+  const getConnectionStatusText = (status: string | undefined | null) => {
+    switch (status) {
+      case 'ACTIVE':
+        return 'Connected';
+      case 'INITIATED':
+        return 'Connecting...';
+      default:
+        return 'Connect';
+    }
   }
 
   return (
@@ -52,26 +76,26 @@ export function ToolCard({ tool, onInstall, isInstalling }: ToolCardProps) {
       </CardContent>
 
       <CardFooter className="pt-0">
-        {tool.isInstalled ? (
-          <Button disabled className="w-full bg-green-50 text-green-700 border border-green-200 hover:bg-green-50">
+        {tool.connectionStatus === 'ACTIVE' ? (
+          <Button disabled className="w-full bg-green-50 text-green-700 border border-green-200">
             <CheckCircle className="mr-2 h-4 w-4" />
-            Installed
+            Connected
           </Button>
         ) : (
           <Button
             onClick={() => onInstall(tool.appName)}
-            disabled={isInstalling}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            disabled={isInstalling || tool.connectionStatus === 'INITIATED'}
+            className={`w-full ${getConnectionStatusColor(tool.connectionStatus)}`}
           >
-            {isInstalling ? (
+            {isInstalling || tool.connectionStatus === 'INITIATED' ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Installing...
+                {tool.connectionStatus === 'INITIATED' ? 'Connecting...' : 'Connecting...'}
               </>
             ) : (
               <>
                 <PlusCircle className="mr-2 h-4 w-4" />
-                Install
+                Connect
               </>
             )}
           </Button>

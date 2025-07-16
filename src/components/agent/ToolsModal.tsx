@@ -18,6 +18,8 @@ interface Tool {
   description: string;
   icon: string;
   isInstalled: boolean;
+  connectionStatus?: "INITIATED" | "ACTIVE" | "INACTIVE" | null;
+  connectedAccountId?: string;
 }
 
 interface ToolsModalProps {
@@ -30,22 +32,81 @@ export function ToolsModal({ isOpen, onClose, sessionId }: ToolsModalProps) {
   const [tools, setTools] = useState<Tool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [activeConnections, setActiveConnections] = useState<Record<string, string>>({});
+
+  // Poll for connection status
+  useEffect(() => {
+    let pollInterval: NodeJS.Timeout;
+
+    const pollConnectionStatus = async () => {
+      const toolsWithPendingConnections = tools.filter(
+        tool => tool.connectionStatus === 'INITIATED' && tool.connectedAccountId
+      );
+
+      for (const tool of toolsWithPendingConnections) {
+        try {
+          const response = await fetch('/api/agent/connect/callback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connectedAccountId: tool.connectedAccountId })
+          });
+
+          const data = await response.json();
+          
+          if (data.success) {
+            setTools(prev => 
+              prev.map(t => 
+                t.appName === tool.appName 
+                  ? { ...t, connectionStatus: data.status }
+                  : t
+              )
+            );
+
+            if (data.status === 'ACTIVE') {
+              setActiveConnections(prev => ({
+                ...prev,
+                [tool.appName]: tool.connectedAccountId!
+              }));
+            }
+          }
+        } catch (error) {
+          console.error('Error polling connection status:', error);
+        }
+      }
+    };
+
+    if (isOpen && tools.some(tool => tool.connectionStatus === 'INITIATED')) {
+      pollInterval = setInterval(pollConnectionStatus, 5000); // Poll every 5 seconds
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [isOpen, tools]);
 
   useEffect(() => {
     if (isOpen && sessionId) {
       const fetchTools = async () => {
         setIsLoading(true);
-        const mockToolsRaw = await getAvailableComposioTools();
-        const mockTools: Tool[] = mockToolsRaw.map((tool: any) => ({
-          ...tool,
-          isInstalled: tool.isInstalled ?? false,
-        }));
-        setTools(mockTools);
-        setIsLoading(false);
+        try {
+          const mockToolsRaw = await getAvailableComposioTools();
+          const mockTools: Tool[] = mockToolsRaw.map((tool: any) => ({
+            ...tool,
+            connectionStatus: activeConnections[tool.appName] ? 'ACTIVE' : null,
+            connectedAccountId: activeConnections[tool.appName]
+          }));
+          setTools(mockTools);
+        } catch (error) {
+          console.error('Error fetching tools:', error);
+        } finally {
+          setIsLoading(false);
+        }
       };
       fetchTools();
     }
-  }, [isOpen, sessionId]);
+  }, [isOpen, sessionId, activeConnections]);
 
   const handleInstall = async (appName: string) => {
     if (!sessionId) return;
@@ -57,15 +118,33 @@ export function ToolsModal({ isOpen, onClose, sessionId }: ToolsModalProps) {
         body: JSON.stringify({ appName, userId: sessionId }),
       });
       const data = await response.json();
-      if (data.success && data.redirectUrl) {
-        window.location.href = data.redirectUrl;
+      
+      if (data.success && data.connectedAccountId) {
+        // Update tool status to INITIATED
+        setTools(prev =>
+          prev.map(tool =>
+            tool.appName === appName
+              ? {
+                  ...tool,
+                  connectionStatus: 'INITIATED',
+                  connectedAccountId: data.connectedAccountId
+                }
+              : tool
+          )
+        );
+
+        // Open authentication window
+        if (data.redirectUrl) {
+          window.open(data.redirectUrl, '_blank', 'width=600,height=800');
+        }
       } else {
         console.error("Failed to initiate connection:", data.error);
       }
     } catch (error) {
       console.error("Error during installation:", error);
+    } finally {
+      setIsInstalling(false);
     }
-    setIsInstalling(false);
   };
 
   return (

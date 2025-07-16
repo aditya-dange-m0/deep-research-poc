@@ -2,19 +2,33 @@
 import { useState, useEffect, useRef } from "react"
 import type React from "react"
 
-import { useChat } from "ai/react"
 import { v4 as uuidv4 } from "uuid"
-import { User, Bot, Search, Settings, Plug, WandSparkles, Send } from "lucide-react"
+import { User, Bot, Search, Settings, Plug, WandSparkles, Send, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ToolsModal } from "@/components/agent/ToolsModal"
 import { PersonalizationSheet } from "@/components/agent/PersonalizationSheet"
 
+interface MessageExtended {
+  id?: string;
+  role: string;
+  content: string;
+  tools?: {
+    name: string;
+    args: any;
+  }[];
+}
+
 export default function AgentPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<MessageExtended[]>([])
+  const [input, setInput] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false)
   const [isPersonalizationSheetOpen, setIsPersonalizationSheetOpen] = useState(false)
+  const [currentTools, setCurrentTools] = useState<{name: string; args: any}[]>([])
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -23,14 +37,73 @@ export default function AgentPage() {
     }
   }, [sessionId])
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, error } = useChat({
-    api: "/api/agent/chat",
-    body: { userId: sessionId },
-    id: sessionId || undefined,
-    onError: (error) => {
-      console.error("Chat error:", error)
-    },
-  })
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+  }
+
+  const sendMessage = async (content: string) => {
+    if (!sessionId || !content.trim()) return
+
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      // Add user message to the chat
+      const userMessage: MessageExtended = {
+        id: uuidv4(),
+        role: 'user',
+        content: content.trim()
+      }
+      setMessages(prev => [...prev, userMessage])
+
+      // Send request to API
+      const response = await fetch('/api/agent/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userQuery: content.trim(),
+          userId: sessionId
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to send message')
+      }
+
+      const data = await response.json()
+
+      // Add assistant message to the chat
+      const assistantMessage: MessageExtended = {
+        id: uuidv4(),
+        role: 'assistant',
+        content: data.response,
+        tools: data.executedTools
+      }
+      setMessages(prev => [...prev, assistantMessage])
+
+      // Update tools if any were used
+      if (data.executedTools) {
+        setCurrentTools(data.executedTools)
+      }
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+      console.error('Chat error:', err)
+    } finally {
+      setIsLoading(false)
+      setInput("")  // Clear input after sending
+    }
+  }
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || isLoading || !sessionId) return
+    
+    await sendMessage(input)
+  }
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -41,12 +114,6 @@ export default function AgentPage() {
       }
     }
   }, [messages, isLoading])
-
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || isLoading) return
-    handleSubmit(e)
-  }
 
   return (
     <div className="flex h-screen w-full flex-col bg-white">
@@ -122,7 +189,7 @@ export default function AgentPage() {
           <ScrollArea className="h-full" ref={scrollAreaRef}>
             <div className="max-w-4xl mx-auto px-4 py-4">
               <div className="space-y-6">
-                {messages.map((message, index) => (
+                {messages.map((message: MessageExtended, index) => (
                   <div key={message.id || index} className="flex gap-4 group">
                     <div className="flex-shrink-0">
                       {message.role === "user" ? (
@@ -140,6 +207,20 @@ export default function AgentPage() {
                         <span className="text-sm font-medium text-gray-900">
                           {message.role === "user" ? "You" : "Genspark"}
                         </span>
+                        {message.role === "assistant" && message.tools && message.tools.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-gray-500">Using:</span>
+                            {message.tools.map((tool, idx) => (
+                              <span
+                                key={`${tool.name}-${idx}`}
+                                className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700"
+                                title={JSON.stringify(tool.args, null, 2)}
+                              >
+                                {tool.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
                         {message.content || "No content"}
@@ -155,19 +236,55 @@ export default function AgentPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-medium text-gray-900">Genspark</span>
+                        <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                        {currentTools.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-gray-500">Using:</span>
+                            {currentTools.map((tool, idx) => (
+                              <span
+                                key={`${tool.name}-${idx}`}
+                                className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 animate-pulse"
+                              >
+                                {tool.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
-                        <div
-                          className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.1s" }}
-                        ></div>
-                        <div
-                          className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.2s" }}
-                        ></div>
-                      </div>
+                      <div className="text-sm text-gray-500">Processing...</div>
                     </div>
+                  </div>
+                )}
+                {/* Tool execution status messages */}
+                {Object.keys(currentTools).length > 0 && (
+                  <div className="mt-4">
+                    {Object.entries(currentTools).map(
+                      ([toolName, executed], index) =>
+                        executed && (
+                          <div
+                            key={toolName}
+                            className="flex items-center gap-2 p-2 bg-green-50 text-green-800 rounded-lg mb-2"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              className="h-5 w-5 flex-shrink-0"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              strokeWidth={2}
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M9 12l2 2 4-4m2-2a9 9 0 11-18 0 9 9 0 0118 0z"
+                              />
+                            </svg>
+                            <span className="text-sm">
+                              {`Tool "${toolName}" executed successfully`}
+                            </span>
+                          </div>
+                        )
+                    )}
                   </div>
                 )}
               </div>
@@ -189,7 +306,9 @@ export default function AgentPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault()
-                  onSubmit(e as any)
+                  if (input.trim() && !isLoading && sessionId) {
+                    onSubmit(e)
+                  }
                 }
               }}
             />
@@ -202,7 +321,7 @@ export default function AgentPage() {
               <Send className="h-4 w-4" />
             </Button>
           </div>
-          {error && <p className="text-red-500 text-sm mt-2">Error: {error.message}</p>}
+          {error && <p className="text-red-500 text-sm mt-2">Error: {error}</p>}
         </form>
         <div className="flex items-center justify-center mt-3">
           <p className="text-xs text-gray-400">
