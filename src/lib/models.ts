@@ -31,6 +31,6 @@ export function getModelProvider(
         `Unsupported model platform: ${platform}. Defaulting to gemini-1.5-flash-latest.`
       );
       // --- CHANGE: Default model is now Google Gemini Flash ---
-      return google("gemini-1.5-flash-latest");
+      return google("gemini-2.0-flash-latest");
   }
 }

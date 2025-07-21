@@ -7,8 +7,9 @@ export type ID = string;
 
 export const supportedModels = [
   "openai:gpt-4o-mini",
-  "google:gemini-1.5-flash-latest",
-  "google:gemini-1.5-pro-latest",
+  "google:gemini-2.0-flash",
+  "google:gemini-2.5-flash-lite-preview-06-17",
+  "google:gemini-2.0-flash-lite-001"
 ] as const;
 export type SupportedModel = (typeof supportedModels)[number];
 
