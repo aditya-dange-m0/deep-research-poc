@@ -1,14 +1,10 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOpenAI } from "@ai-sdk/openai";
 import { LanguageModel } from "ai";
 import { SupportedModel } from "./types";
 
-// Memoize the providers to avoid re-creating them on every call
+// Memoize the provider to avoid re-creating it on every call
 const google = createGoogleGenerativeAI({
-  apiKey: process.env.GOOGLE_API_KEY, // Ensure you have GOOGLE_API_KEY for Gemini
-});
-const openai = createOpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.GOOGLE_API_KEY,
 });
 
 /**
@@ -22,15 +18,12 @@ export function getModelProvider(
   const [platform, modelName] = modelIdentifier.split(":");
 
   switch (platform) {
-    case "openai":
-      return openai(modelName as any); // Using 'as any' is a safe workaround for SDK's specific type strings
     case "google":
       return google(modelName as any);
     default:
       console.warn(
-        `Unsupported model platform: ${platform}. Defaulting to gemini-1.5-flash-latest.`
+        `Unsupported model platform: ${platform}. Defaulting to gemini-3-flash-preview.`
       );
-      // --- CHANGE: Default model is now Google Gemini Flash ---
-      return google("gemini-2.0-flash-latest");
+      return google("gemini-3-flash-preview");
   }
 }

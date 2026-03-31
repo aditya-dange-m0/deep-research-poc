@@ -132,30 +132,32 @@ export async function searchAndEvaluate({
 
   const evaluationModel = getModelProvider(model);
   let totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
-  const relevantResults: SearchResult[] = [];
 
-  for (const result of searchResults) {
-    try {
+  // Evaluate all results in parallel — biggest latency win in the pipeline
+  const evaluations = await Promise.allSettled(
+    searchResults.map(async (result) => {
       const prompt = createEvaluationPrompt(result, query, existingUrls);
       const { object, usage } = await generateObject({
         model: evaluationModel,
         schema: RelevanceSchema,
         prompt,
       });
+      return { result, decision: object.evaluation, usage };
+    })
+  );
 
-      totalUsage.inputTokens += usage.promptTokens;
-      totalUsage.outputTokens += usage.completionTokens;
-
-      // --- FIX: Access the evaluation from the nested object property ---
-      const decision = object.evaluation;
-      console.log(`EVALUATION: URL: ${result.url}, Relevant: ${decision}`);
-
-      if (decision === "RELEVANT") {
-        relevantResults.push(result);
-      }
-    } catch (error) {
-      console.error(`Error evaluating URL ${result.url}:`, error);
-      // Continue to the next result even if one fails
+  const relevantResults: SearchResult[] = [];
+  for (const outcome of evaluations) {
+    if (outcome.status === "rejected") {
+      console.error(`Error evaluating a result:`, outcome.reason);
+      continue;
+    }
+    const { result, decision, usage } = outcome.value;
+    totalUsage.inputTokens += usage.promptTokens;
+    totalUsage.outputTokens += usage.completionTokens;
+    console.log(`EVALUATION: URL: ${result.url}, Relevant: ${decision}`);
+    if (decision === "RELEVANT") {
+      relevantResults.push(result);
     }
   }
 

@@ -54,7 +54,7 @@ export async function checkRelevance({
   query: string;
   existingUrls: string[];
 }): Promise<{ relevantResults: SearchResult[]; usage: TokenUsage }> {
-  const model = getModelProvider("openai:gpt-4o-mini"); // Use a fast model for this
+  const model = getModelProvider('google:gemini-3-flash-preview'); // Use a fast model for this
   const evaluations: Promise<{
     result: SearchResult | null;
     usage: TokenUsage;

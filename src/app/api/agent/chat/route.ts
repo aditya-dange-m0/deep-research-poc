@@ -1,7 +1,6 @@
 // src/app/api/chat/route.ts
 import { NextResponse } from "next/server";
-import { generateText, generateObject, ToolSet, CoreMessage } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { generateText, generateObject, ToolSet, ModelMessage, stepCountIs } from "ai";
 import { z } from "zod";
 import { getModelProvider } from "@/lib/models";
 import Redis from "ioredis";
@@ -21,9 +20,7 @@ import {
 } from "@/lib/agent-backend/composioService";
 import { ComposioToolSet } from "composio-core";
 
-const AGENT_LLM_MODEL = "gpt-4o-mini";
-const model = getModelProvider("openai:gpt-4o-mini");
-const model_gemini = getModelProvider("openai:gpt-4o-mini");
+const model = getModelProvider('google:gemini-3-flash-preview');
 const MAX_AGENT_STEPS = 8;
 const MAX_CONVERSATION_HISTORY = 10;
 const CACHE_TTL = 300; // 5 minutes in seconds for Redis
@@ -134,8 +131,8 @@ class RedisCache {
 
   private constructor() {
     this.redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      host: process.env.REDIS_HOST || "localhost",
+      port: parseInt(process.env.REDIS_PORT || "6379", 10),
       retryStrategy: (times) => {
         const delay = Math.min(times * 50, 2000);
         return delay;
@@ -145,11 +142,11 @@ class RedisCache {
       keepAlive: 30000,
     });
 
-    this.redis.on('error', (err) => {
-      console.error('[Redis] Connection Error:', err);
+    this.redis.on("error", (err) => {
+      console.error("[Redis] Connection Error:", err);
     });
-    this.redis.on('connect', () => {
-      console.log('[Redis] Connected successfully');
+    this.redis.on("connect", () => {
+      console.log("[Redis] Connected successfully");
     });
   }
 
@@ -170,7 +167,11 @@ class RedisCache {
     }
   }
 
-  async set(key: string, value: any, ttlSeconds: number = CACHE_TTL): Promise<void> {
+  async set(
+    key: string,
+    value: any,
+    ttlSeconds: number = CACHE_TTL
+  ): Promise<void> {
     try {
       await this.redis.setex(key, ttlSeconds, JSON.stringify(value));
     } catch (error) {
@@ -182,14 +183,16 @@ class RedisCache {
     if (keys.length === 0) return [];
     try {
       const values = await this.redis.mget(...keys);
-      return values.map(v => v ? JSON.parse(v) : null);
+      return values.map((v) => (v ? JSON.parse(v) : null));
     } catch (error) {
       console.warn(`[Redis] MGET error:`, error);
       return new Array(keys.length).fill(null);
     }
   }
 
-  async mset(keyValuePairs: { key: string; value: any; ttl?: number }[]): Promise<void> {
+  async mset(
+    keyValuePairs: { key: string; value: any; ttl?: number }[]
+  ): Promise<void> {
     if (keyValuePairs.length === 0) return;
     try {
       const pipeline = this.redis.pipeline();
@@ -212,7 +215,10 @@ class RedisCacheManager {
   }
 
   // Tool search caching
-  async getCachedToolSearch(appName: string, query: string): Promise<string[] | null> {
+  async getCachedToolSearch(
+    appName: string,
+    query: string
+  ): Promise<string[] | null> {
     const key = `tool_search:${appName}:${this.hashString(query)}`;
     const cached = await this.redisCache.get<string[]>(key);
     if (cached) {
@@ -223,7 +229,11 @@ class RedisCacheManager {
     return null;
   }
 
-  async setCachedToolSearch(appName: string, query: string, tools: string[]): Promise<void> {
+  async setCachedToolSearch(
+    appName: string,
+    query: string,
+    tools: string[]
+  ): Promise<void> {
     const key = `tool_search:${appName}:${this.hashString(query)}`;
     await this.redisCache.set(key, tools);
     console.log(`[Cache] SET: Tool search for ${appName}:${query}`);
@@ -259,14 +269,19 @@ class RedisCacheManager {
     return null;
   }
 
-  async setCachedConnectionStatus(connectionId: string, status: any): Promise<void> {
+  async setCachedConnectionStatus(
+    connectionId: string,
+    status: any
+  ): Promise<void> {
     const key = `connection_status:${connectionId}`;
     await this.redisCache.set(key, status);
     console.log(`[Cache] SET: Connection status for ${connectionId}`);
   }
 
   // Analysis caching
-  async getCachedAnalysis(queryHash: string): Promise<ComprehensiveAnalysis | null> {
+  async getCachedAnalysis(
+    queryHash: string
+  ): Promise<ComprehensiveAnalysis | null> {
     const key = `analysis:${queryHash}`;
     const cached = await this.redisCache.get<ComprehensiveAnalysis>(key);
     if (cached) {
@@ -277,7 +292,10 @@ class RedisCacheManager {
     return null;
   }
 
-  async setCachedAnalysis(queryHash: string, analysis: ComprehensiveAnalysis): Promise<void> {
+  async setCachedAnalysis(
+    queryHash: string,
+    analysis: ComprehensiveAnalysis
+  ): Promise<void> {
     const key = `analysis:${queryHash}`;
     await this.redisCache.set(key, analysis);
     console.log(`[Cache] SET: Analysis for hash ${queryHash}`);
@@ -286,7 +304,7 @@ class RedisCacheManager {
   // Helper method to create consistent hash keys
   private hashString(str: string): string {
     // Simple hash function for demonstration, in production consider a more robust one
-    return btoa(unescape(encodeURIComponent(str))).replace(/[/+=]/g, '_');
+    return btoa(unescape(encodeURIComponent(str))).replace(/[/+=]/g, "_");
   }
 
   // No cleanup method needed - Redis handles TTL automatically
@@ -352,10 +370,10 @@ class PerformanceMonitor {
     if (!this.metrics.has(operationName)) {
       this.metrics.set(operationName, []);
     }
-    
+
     const times = this.metrics.get(operationName)!;
     times.push(duration);
-    
+
     // Keep only last 100 measurements
     if (times.length > 100) {
       times.shift();
@@ -365,20 +383,20 @@ class PerformanceMonitor {
   getAverageTime(operationName: string): number {
     const times = this.metrics.get(operationName);
     if (!times || times.length === 0) return 0;
-    
+
     return times.reduce((sum, time) => sum + time, 0) / times.length;
   }
 
-  getMetrics(): Record<string, { avg: number, count: number }> {
-    const result: Record<string, { avg: number, count: number }> = {};
-    
+  getMetrics(): Record<string, { avg: number; count: number }> {
+    const result: Record<string, { avg: number; count: number }> = {};
+
     this.metrics.forEach((times, operation) => {
       result[operation] = {
         avg: this.getAverageTime(operation),
-        count: times.length
+        count: times.length,
       };
     });
-    
+
     return result;
   }
 }
@@ -386,7 +404,7 @@ class PerformanceMonitor {
 // Optimized single-call analysis service
 class OptimizedAnalysisService {
   private performanceMonitor = PerformanceMonitor.getInstance();
-  
+
   private generateQueryHash(query: string, history: ChatMessage[]): string {
     const historySnippet = history
       .slice(-3)
@@ -403,13 +421,15 @@ class OptimizedAnalysisService {
     currentSummary: any = null
   ): Promise<ComprehensiveAnalysis> {
     const startTime = Date.now();
-    
+
     // Check cache first
     const queryHash = this.generateQueryHash(userQuery, conversationHistory);
     const cached = await cacheManager.getCachedAnalysis(queryHash);
     if (cached) {
       const duration = Date.now() - startTime;
-      console.log(`[Analysis] Using cached comprehensive analysis. Duration: ${duration}ms`);
+      console.log(
+        `[Analysis] Using cached comprehensive analysis. Duration: ${duration}ms`
+      );
       return cached;
     }
 
@@ -467,13 +487,13 @@ class OptimizedAnalysisService {
     try {
       console.log("[Analysis] Calling LLM for comprehensive analysis...");
       const { object } = await generateObject({
-        model: model_gemini,
+        model: model,
         system:
           "You are a comprehensive analysis assistant that provides complete query analysis in a single pass.",
         prompt: prompt,
         schema: comprehensiveAnalysisSchema,
         temperature: 0.1,
-        maxTokens: 2000,
+        maxOutputTokens: 2000,
       });
 
       // Cache the result
@@ -497,7 +517,10 @@ class OptimizedAnalysisService {
       return object;
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[Analysis] Error in comprehensive analysis after ${duration}ms:`, error);
+      console.error(
+        `[Analysis] Error in comprehensive analysis after ${duration}ms:`,
+        error
+      );
       // Return minimal fallback
       return {
         queryAnalysis: "Basic query analysis - fallback due to error",
@@ -646,7 +669,9 @@ class OptimizedToolService {
       );
 
       // Check connection status with caching
-      let connectionStatus = await cacheManager.getCachedConnectionStatus(connectedAccountId);
+      let connectionStatus = await cacheManager.getCachedConnectionStatus(
+        connectedAccountId
+      );
       if (!connectionStatus) {
         console.log(
           `[Tools] Fetching connection status for ${appName} (${connectedAccountId})...`
@@ -761,7 +786,10 @@ class OptimizedToolService {
               toolsToFetchForApp
             )}`
           );
-          const tools = (await getComposioTool(toolsToFetchForApp)) as ToolSet;
+          const tools = (await getComposioTool(
+            toolsToFetchForApp,
+            userId
+          )) as ToolSet;
           console.log(
             `[Tools] Fetched ${Object.keys(tools).length} tools for ${appName}.`
           );
@@ -807,28 +835,45 @@ class OptimizedToolService {
       requiredConnections: appsNeedingConnection,
     };
   }
-
   private async getConnectedAccountIdForUserAndApp(
     userId: string,
     appName: string
   ): Promise<string> {
-    // Mock implementation - replace with your actual logic
-    const mockConnectedAccountMap: { [key: string]: string } = {
-      GMAIL: "76a0dd9f-907d-4b16-8c76-44e17b31b180",
-      GOOGLECALENDAR: "c9e13275-ed69-4e56-855b-f9399e3e412a", // Example: A real ID for testing
-      GOOGLEDRIVE: "mock_drive_conn_id_123",
-      NOTION: "mock_notion_conn_id_123",
-      GOOGLEDOCS: "8e0f132c-a72b-46a2-951a-8c57b859e532", // Example: A real ID for testing
+    // { userId: { appName: connectionId } }
+    const mockConnectedAccountMap: {
+      [userId: string]: { [appName: string]: string };
+    } = {
+      "5f52cccd-77c8-4316-8da0-26a18fd01d7b": { // User Entity ID Generated in the Frontend
+        GMAIL: "115d0196-f28c-482f-b6d8-360397eaa914",
+        GOOGLECALENDAR: "16b0af21-36b8-43b5-a95c-055579703dba",
+        GOOGLEDRIVE: "mock_drive_conn_id_user1_abc",
+        NOTION: "mock_notion_conn_id_user1_xyz",
+        GOOGLEDOCS: "fdca6517-b833-4a56-bc07-9bb8c70fa751",
+      },
+      "984bf230-6866-45de-b610-a08b61aaa6ef": { // User Entity ID Generated in the Frontend
+        GMAIL: "115d0196-f28c-482f-b6d8-360397eaa914",
+        GOOGLECALENDAR: "16b0af21-36b8-43b5-a95c-055579703dba",
+        GOOGLEDRIVE: "mock_drive_conn_id_user2_def",
+        NOTION: "mock_notion_conn_id_user2_uvw",
+        GOOGLEDOCS: "7d7fa0ba-882e-4554-b1bc-2b9c4fe42926",
+      },
     };
-    const accountId = mockConnectedAccountMap[appName];
+
+    const accountId = mockConnectedAccountMap[userId]?.[appName];
+
     console.log(
-      `[Mock Connection] getConnectedAccountIdForUserAndApp for ${appName}: ${
+      `[Mock Connection] getConnectedAccountIdForUserAndApp for User "${userId}" and App "${appName}": ${
         accountId ? "Found" : "Not Found"
       }`
     );
+
     return accountId || "";
   }
 }
+// Aditya Dange
+// Current mockUserConnections: {
+//   '5f52cccd-77c8-4316-8da0-26a18fd01d7b': { GOOGLEDOCS: 'fdca6517-b833-4a56-bc07-9bb8c70fa751' }
+// }
 
 // Optimized execution context
 class OptimizedExecutionContext {
@@ -999,8 +1044,10 @@ export async function POST(req: Request) {
         200
       )}...`
     );
-    const { userQuery, userId, conversationHistory, sessionId } =
-      body.body || body;
+    const { userQuery, conversationHistory, sessionId } = body.body || body;
+    // const userId = "5f52cccd-77c8-4316-8da0-26a18fd01d7b";
+    const userId = "984bf230-6866-45de-b610-a08b61aaa6ef"
+
 
     // Input validation
     if (!userQuery?.trim() || !userId?.trim()) {
@@ -1015,7 +1062,7 @@ export async function POST(req: Request) {
     }
 
     console.log(
-      `🚀 Production Chat Request - User: ${userId}, Query: "${userQuery}", Session: ${
+      `🚀 --------------------Production Chat Request - User: ${userId}, Query: "${userQuery}", Session: ${
         sessionId || "N/A"
       }`
     );
@@ -1125,8 +1172,8 @@ export async function POST(req: Request) {
           tools: toolResult.tools,
           toolChoice: "auto",
           temperature: 0.3,
-          maxSteps: MAX_AGENT_STEPS,
-          maxTokens: 3000,
+          stopWhen: stepCountIs(MAX_AGENT_STEPS),
+          maxOutputTokens: 3000,
         });
 
         finalExecutedTools = executionResult.toolCalls || [];
@@ -1242,7 +1289,7 @@ export async function POST(req: Request) {
           model: model,
           prompt: simplePrompt,
           temperature: 0.4,
-          maxTokens: 1500,
+          maxOutputTokens: 1500,
         });
 
         finalResponseText = simpleResult.text || finalResponseText;
@@ -1267,7 +1314,7 @@ Provide a helpful, conversational response. If unclear, ask for clarification po
         model: model,
         prompt: conversationalPrompt,
         temperature: 0.5,
-        maxTokens: 1000,
+        maxOutputTokens: 1000,
       });
 
       finalResponseText =

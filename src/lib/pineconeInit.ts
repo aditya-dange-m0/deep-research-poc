@@ -9,49 +9,54 @@ import {
 import { PineconeRecord, RecordMetadata } from "@pinecone-database/pinecone";
 import "dotenv/config"; // Loads .env file
 
-const PINECONE_API_KEY = process.env.PINECONE_API_KEY!;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-const PINECONE_INDEX_NAME = process.env.PINECONE_INDEX_NAME!;
+const PINECONE_API_KEY = process.env.PINECONE_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const PINECONE_INDEX_NAME = process.env.PINECONE_INDEX_NAME;
 
-if (!PINECONE_API_KEY || !OPENAI_API_KEY || !PINECONE_INDEX_NAME) {
-  throw new Error("Missing environment variables for Pinecone or OpenAI");
+// Validate lazily at call-time so missing vars don't crash the Next.js worker on cold start
+function requireEnv(): { pineconeKey: string; openaiKey: string; indexName: string } {
+  if (!PINECONE_API_KEY || !OPENAI_API_KEY || !PINECONE_INDEX_NAME) {
+    throw new Error("Missing environment variables for Pinecone or OpenAI");
+  }
+  return { pineconeKey: PINECONE_API_KEY, openaiKey: OPENAI_API_KEY, indexName: PINECONE_INDEX_NAME };
 }
 
 const pinecone = new Pinecone({
-  apiKey: PINECONE_API_KEY,
+  apiKey: PINECONE_API_KEY ?? "",
 });
 
 const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY,
+  apiKey: OPENAI_API_KEY ?? "",
 });
 
 const EMBEDDING_MODEL = "text-embedding-3-small"; // Recommended OpenAI embedding model
 
 // This function will be called once to ensure the index exists
 export async function initializePineconeIndex() {
+  const { indexName } = requireEnv();
   const indexList = await pinecone.listIndexes();
-  if (!indexList.indexes?.some((index) => index.name === PINECONE_INDEX_NAME)) {
-    console.log(`Creating Pinecone index: ${PINECONE_INDEX_NAME}...`);
-    // Dimension for 'text-embedding-3-small' is 1536
+  if (!indexList.indexes?.some((index) => index.name === indexName)) {
+    console.log(`Creating Pinecone index: ${indexName}...`);
     await pinecone.createIndex({
-      name: PINECONE_INDEX_NAME,
+      name: indexName,
       dimension: 1536,
-      metric: "cosine", // Cosine similarity is common for embeddings
+      metric: "cosine",
       spec: {
         serverless: {
-          cloud: "aws", // or 'gcp', 'azure' based on your Pinecone setup
-          region: "us-east-1", // or your specific region
+          cloud: "aws",
+          region: "us-east-1",
         },
       },
       waitUntilReady: true,
     });
-    console.log(`Pinecone index ${PINECONE_INDEX_NAME} created.`);
+    console.log(`Pinecone index ${indexName} created.`);
   } else {
-    console.log(`Pinecone index ${PINECONE_INDEX_NAME} already exists.`);
+    console.log(`Pinecone index ${indexName} already exists.`);
   }
 }
 
 export async function generateEmbedding(text: string): Promise<number[]> {
+  requireEnv();
   try {
     const response = await openai.embeddings.create({
       model: EMBEDDING_MODEL,
@@ -74,7 +79,8 @@ export async function ingestComposioAppToolsToPinecone(
   appKey: string,
   tools: ToolsObject
 ): Promise<void> {
-  const index = pinecone.index<ToolMetadata>(PINECONE_INDEX_NAME);
+  const { indexName } = requireEnv();
+  const index = pinecone.index<ToolMetadata>(indexName);
   const records: PineconeRecord<ToolMetadata>[] = []; // Now PineconeRecord is correctly imported
 
   for (const toolName in tools) {
@@ -117,7 +123,8 @@ export async function getComposioAppToolsFromPinecone(
   naturalLanguageQuery: string,
   topK: number = 3
 ): Promise<string[]> {
-  const index = pinecone.index<ToolMetadata>(PINECONE_INDEX_NAME);
+  const { indexName } = requireEnv();
+  const index = pinecone.index<ToolMetadata>(indexName);
 
   // 1. Generate embedding for the natural language query
   const queryEmbedding = await generateEmbedding(naturalLanguageQuery);

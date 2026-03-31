@@ -14,7 +14,10 @@ export async function POST(req: NextRequest) {
 
     // 1. Validate the incoming request body against our schem
 
-    const { appName, userId } = body;
+    const { appName } = body;
+    // const userId = "5f52cccd-77c8-4316-8da0-26a18fd01d7b" // Aditya M0
+    const userId = "984bf230-6866-45de-b610-a08b61aaa6ef" // Aditya5212
+
     console.log(
       `Received connection initiation request for app: ${appName}, user session: ${userId}`
     );

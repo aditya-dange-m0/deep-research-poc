@@ -1,5 +1,4 @@
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
 import { TokenUsage, SupportedModel } from "@/lib/types";
 import { getModelProvider } from "@/lib/models";
 

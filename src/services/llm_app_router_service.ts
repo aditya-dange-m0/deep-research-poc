@@ -1,6 +1,6 @@
 // services/llm_app_router_service.ts (Conceptual improvement using Zod)
 import { generateObject } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { z } from 'zod'; // You would need to install Zod: npm install zod
 
 import { getTopToolDescriptionsForApp, getAllAvailableAppNames } from '../data/top_tools_registry';
@@ -14,7 +14,9 @@ export const llmRoutingSchema = z.object({
 // Infer the TypeScript type from the Zod schema
 export type LLMRoutingResponse = z.infer<typeof llmRoutingSchema>;
 
-const LLM_MODEL = 'gpt-4o-mini';
+const LLM_MODEL = 'gemini-3-flash-preview';
+
+const google = createGoogleGenerativeAI({ apiKey: process.env.GOOGLE_API_KEY });
 
 export async function routeAppsWithLLM(
   userQuery: string
@@ -40,7 +42,7 @@ User Query: "${userQuery}"`;
 
   try {
     const { object } = await generateObject({
-      model: openai(LLM_MODEL),
+      model: google(LLM_MODEL),
       system: 'You are a helpful assistant that provides JSON responses.',
       prompt: prompt,
       schema: llmRoutingSchema, // Pass the Zod schema here

@@ -1,11 +1,12 @@
-// src/backend/composioService.ts
-
+// // src/backend/composioService.ts
 import { VercelAIToolSet, ConnectionRequest } from "composio-core";
+import { v4 as uuidv4 } from "uuid";
 
 // It's crucial to ensure COMPOSIO_API_KEY is set in your environment.
 // In a Next.js API route, this would typically be accessed via process.env.COMPOSIO_API_KEY.
 const COMPOSIO_API_KEY =
-  process.env.COMPOSIO_API_KEY || "sh6ezs034ez0pxtd7akxs"; // Ensure this is set in your .env.local
+  process.env.COMPOSIO_API_KEY || "sh6ezs034ez0pxtd7akxs";
+
 if (!COMPOSIO_API_KEY) {
   console.error("No COMPOSIO_API_KEY found in environment variables.", {
     COMPOSIO_API_KEY,
@@ -17,19 +18,72 @@ const toolset = new VercelAIToolSet({
   apiKey: COMPOSIO_API_KEY,
 });
 
+// --- UUID Generation Function ---
+export function generateUUID(): string {
+  return uuidv4();
+}
+// https://x.com/i/jobs/1945257330012250112
+// --- Mock Storage Logic (In-memory for POC) ---
+const mockUserConnections: { [userId: string]: { [appName: string]: string } } =
+  {};
+
+/**
+ * Mocks saving a user's connection details to a persistent store.
+ * In a real application, this would interact with a database.
+ *
+ * @param userId The ID of the user.
+ * @param appName The name of the application connected.
+ * @param connectedAccountId The ID of the established Composio connection.
+ */
+async function saveUserConnection(
+  userId: string,
+  appName: string,
+  connectedAccountId: string
+): Promise<void> {
+  if (!mockUserConnections[userId]) {
+    mockUserConnections[userId] = {};
+  }
+  mockUserConnections[userId][appName] = connectedAccountId;
+  console.log(
+    `[Mock DB] Saved connection for user '${userId}', app '${appName}': ${connectedAccountId}`
+  );
+  console.log("Current mockUserConnections:", mockUserConnections);
+}
+
+/**
+ * Mocks retrieving a user's connected account ID for a specific application.
+ * In a real application, this would query a database.
+ *
+ * @param userId The ID of the user.
+ * @param appName The name of the application.
+ * @returns The connectedAccountId string, or null if not found.
+ */
+async function getUserConnection(
+  userId: string,
+  appName: string
+): Promise<string | null> {
+  const connectedAccountId = mockUserConnections[userId]?.[appName] || null;
+  console.log(
+    `[Mock DB] Retrieved connection for user '${userId}', app '${appName}': ${
+      connectedAccountId ? connectedAccountId : "Not Found"
+    }`
+  );
+  return connectedAccountId;
+}
+
 /**
  * Initiates a connection request to a specified application via Composio.
  * This is the first step in the OAuth flow, providing a redirect URL for the user.
- * For this POC, userId (Composio's entityId) is passed in and not persisted on backend.
+ * For a new user (userId is null), a UUID is generated to serve as the userId (Composio's entityId).
+ * The connectedAccountId is then stored using the mock logic.
  *
- * @param userId The ID of the user's session in your application (Composio's entityId).
+ * @param userId The ID of the user's session in your application (Composio's entityId). If null, a new UUID will be generated.
  * @param appName The name of the application to connect (e.g., 'gmail', 'google-drive', 'notion').
  * @returns A Promise resolving to the ConnectionRequest object, which may contain a redirectUrl.
  * @throws Error if Composio API key is not configured or connection initiation fails.
  */
-
 export async function initiateComposioConnection(
-  userId: string, // This will be the session ID for the POC
+  userId: string | null, // This will be the session ID for the POC, a new one will be generated if null
   appName: string
 ): Promise<ConnectionRequest> {
   if (!COMPOSIO_API_KEY) {
@@ -37,6 +91,11 @@ export async function initiateComposioConnection(
       "Composio API key is not configured. Please set COMPOSIO_API_KEY environment variable."
     );
   }
+
+  // Generate a new UUID for the userId if one is not provided.
+  // This new UUID will serve as Composio's entityId for the new user.
+  const entityId = userId || generateUUID();
+
   try {
     // const entity = await toolset.getEntity(userId);
     // console.log(`Composio entity retrieved/created for userId (session ID): ${userId}`);
@@ -51,8 +110,6 @@ export async function initiateComposioConnection(
     // const entity = await toolset.getEntity(userId);
     // console.log(`Composio entity retrieved/created for userId (session ID): ${userId}`);
 
-    // const integrationId = "f0b36145-a8a2-4d80-ad63-dbcd2d162a53";
-
     // // 1. Retrieve the integration details from Composio.
     // console.log(`Fetching integration details for ID: ${integrationId}...`);
     // const integration: any = await toolset.integrations.get({
@@ -65,34 +122,42 @@ export async function initiateComposioConnection(
     //   integrationId: integration.id, // Pass the integration ID within an object
     // });
     // console.log("Expected input fields for connection:", expectedInputFields);
-
-    // 3. Initiate the connection process for the Google Services.
     console.log(
-      "Initiating connection to Google Services (entity: 'default')..."
+      `Initiating connection to ${appName} for entity: '${entityId}'...`
     );
     const initialConnectedAccount = await toolset.connectedAccounts.initiate({
       appName: appName,
-      entityId: userId || "default", // Using 'default' entity as per your previous error messages
+      entityId: entityId,
     });
 
-    let currentConnectedAccount = initialConnectedAccount
+    // Store the connectedAccountId for the user and app
+    if (initialConnectedAccount.connectedAccountId) {
+      await saveUserConnection(
+        entityId,
+        appName,
+        initialConnectedAccount.connectedAccountId
+      );
+    }
 
     console.log(
-      `Initiated Composio connection for ${appName} for user ${userId}. Redirect URL: ${currentConnectedAccount.redirectUrl}`
+      `Initiated Composio connection for ${appName} for user ${entityId}. Redirect URL: ${initialConnectedAccount.redirectUrl}`
     );
     console.log(
       `------------------------------------------------------------------------------------------------------------------------`
     );
-     console.log(
-      `${currentConnectedAccount.connectedAccountId}`
+    console.log(
+      `Connected Account ID: ${initialConnectedAccount.connectedAccountId}`
     );
-     console.log(
+    console.log(
       `------------------------------------------------------------------------------------------------------------------------`
     );
-    return currentConnectedAccount;
+    console.log(
+      `Save User Access Data: ${initialConnectedAccount.saveUserAccessData}----------------------------------------------------------------------------------------------------------------`
+    );
+    return initialConnectedAccount;
   } catch (error) {
     console.error(
-      `Failed to initiate Composio connection for ${appName} and user ${userId}:`,
+      `Failed to initiate Composio connection for ${appName} and user ${entityId}:`,
       error
     );
     throw new Error(
@@ -105,16 +170,22 @@ export async function initiateComposioConnection(
 
 // You might keep this for later status checks, but it won't be used in the initial flow
 export async function getComposioConnectionStatus(connectedAccountId: string) {
-    if (!COMPOSIO_API_KEY) {
-        throw new Error("Composio API key is not configured.");
-    }
-    try {
-        const connection = await toolset.connectedAccounts.get({ connectedAccountId });
-        return connection;
-    } catch (error) {
-        console.error(`Failed to get status for ${connectedAccountId}:`, error);
-        throw new Error(`Failed to get connection status: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  if (!COMPOSIO_API_KEY) {
+    throw new Error("Composio API key is not configured.");
+  }
+  try {
+    const connection = await toolset.connectedAccounts.get({
+      connectedAccountId,
+    });
+    return connection;
+  } catch (error) {
+    console.error(`Failed to get status for ${connectedAccountId}:`, error);
+    throw new Error(
+      `Failed to get connection status: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
 }
 
 /**
@@ -139,7 +210,10 @@ export async function executeComposioAction(
   }
 
   try {
-    console.log(`Executing Composio action '${action}' for user ${userId} using connection ${connectedAccountId} with params:`, params);
+    console.log(
+      `Executing Composio action '${action}' for user ${userId} using connection ${connectedAccountId} with params:`,
+      params
+    );
     // Execute the action using the specific connectedAccountId
     const result = await toolset.executeAction({
       action: action,
@@ -149,15 +223,29 @@ export async function executeComposioAction(
     });
 
     if (!result.successful) {
-      console.error(`Composio action '${action}' failed for user ${userId} and connection ${connectedAccountId}:`, result.error);
-      throw new Error(`Composio action failed: ${result.error || 'Unknown error'}`);
+      console.error(
+        `Composio action '${action}' failed for user ${userId} and connection ${connectedAccountId}:`,
+        result.error
+      );
+      throw new Error(
+        `Composio action failed: ${result.error || "Unknown error"}`
+      );
     }
 
-    console.log(`Composio action '${action}' successful for user ${userId} and connection ${connectedAccountId}.`);
+    console.log(
+      `Composio action '${action}' successful for user ${userId} and connection ${connectedAccountId}.`
+    );
     return result.data;
   } catch (error) {
-    console.error(`Error executing Composio action '${action}' for user ${userId} and connection ${connectedAccountId}:`, error);
-    throw new Error(`Error during action execution: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `Error executing Composio action '${action}' for user ${userId} and connection ${connectedAccountId}:`,
+      error
+    );
+    throw new Error(
+      `Error during action execution: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 
@@ -167,15 +255,53 @@ export async function executeComposioAction(
  *
  * @returns An array of objects representing available tools.
  */
-export async function getAvailableComposioTools(): Promise<{ name: string; appName: string; description: string; icon: string; }[]> {
+export async function getAvailableComposioTools(): Promise<
+  { name: string; appName: string; description: string; icon: string }[]
+> {
   // This list is static for the POC.
   return [
-    { name: "Google Super", appName: "GOOGLESUPER", description: "Access your Google Workspace Suite, including Gmail, Calendar, Drive, and more.", icon: "https://placehold.co/40x40/FF0000/FFFFFF?text=GS" },
-    { name: "Gmail", appName: "GMAIL", description: "Access your Gmail inbox, read and send emails, and search through your messages.", icon: "https://placehold.co/40x40/EA4335/FFFFFF?text=GM" },
-    { name: "Calendar", appName: "GOOGLECALENDAR", description: "Manage your Google Calendar events, set up appointments, and check your schedule.", icon: "https://placehold.co/40x40/4285F4/FFFFFF?text=GC" },
-    { name: "Drive", appName: "GOOGLEDRIVE", description: "Access files stored in your Google Drive, upload documents, and share content.", icon: "https://placehold.co/40x40/34A853/FFFFFF?text=GD" },
-    { name: "Notion", appName: "NOTION", description: "Access your Notion pages, create and edit content, and manage your workspace.", icon: "https://placehold.co/40x40/000000/FFFFFF?text=N" },
-    { name: "Docs", appName: "GOOGLEDOCS", description: "Access files stored in your Google Drive, upload documents, and share content.", icon: "https://placehold.co/40x40/34A853/FFFFFF?text=GD" },
+    {
+      name: "Google Super",
+      appName: "GOOGLESUPER",
+      description:
+        "Access your Google Workspace Suite, including Gmail, Calendar, Drive, and more.",
+      icon: "https://placehold.co/40x40/FF0000/FFFFFF?text=GS",
+    },
+    {
+      name: "Gmail",
+      appName: "GMAIL",
+      description:
+        "Access your Gmail inbox, read and send emails, and search through your messages.",
+      icon: "https://placehold.co/40x40/EA4335/FFFFFF?text=GM",
+    },
+    {
+      name: "Calendar",
+      appName: "GOOGLECALENDAR",
+      description:
+        "Manage your Google Calendar events, set up appointments, and check your schedule.",
+      icon: "https://placehold.co/40x40/4285F4/FFFFFF?text=GC",
+    },
+    {
+      name: "Drive",
+      appName: "GOOGLEDRIVE",
+      description:
+        "Access files stored in your Google Drive, upload documents, and share content.",
+      icon: "https://placehold.co/40x40/34A853/FFFFFF?text=GD",
+    },
+    {
+      name: "Notion",
+      appName: "NOTION",
+      description:
+        "Access your Notion pages, create and edit content, and manage your workspace.",
+      icon: "https://placehold.co/40x40/000000/FFFFFF?text=N",
+    },
+    {
+      name: "Docs",
+      appName: "GOOGLEDOCS",
+      description:
+        "Access files stored in your Google Drive, upload documents, and share content.",
+      icon: "https://placehold.co/40x40/34A853/FFFFFF?text=GD",
+    },
   ];
 }
 
@@ -197,49 +323,62 @@ export async function getComposioAppTools(appName: string): Promise<Object> {
     // Fetch default tools for the specified app, associated with the entityId
     // Composio's getTools returns tools in a format that needs to be adapted for Vercel AI SDK.
     // The `execute` function will be handled by our backend logic in chat route.
-    const composioTools = await toolset.getTools({ apps: [appName]});
+    const composioTools = await toolset.getTools({ apps: [appName] });
     console.log(`Fetched ${composioTools.length} tools for app: ${appName}`);
 
     return composioTools;
   } catch (error) {
     console.error(`Error fetching Composio tools for app ${appName}:`, error);
-    throw new Error(`Failed to fetch Composio tools for ${appName}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Failed to fetch Composio tools for ${appName}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 
-
-export async function getComposioTool(tools: string[]): Promise<Object> {
+export async function getComposioTool( tools: string[], userId: string): Promise<Object> {
   if (!COMPOSIO_API_KEY) {
     throw new Error("Composio API key is not configured.");
   }
-  
+
   try {
     // Fetch default tools for the specified app, associated with the entityId
     // Composio's getTools returns tools in a format that needs to be adapted for Vercel AI SDK.
     // The `execute` function will be handled by our backend logic in chat route.
-    const fetchedTools = await toolset.getTools({ actions: tools });
+    const fetchedTools = await toolset.getTools({ actions: tools }, userId);
     // console.log(`Fetched tools for app: ${toolName}`);
     return fetchedTools;
   } catch (error) {
     console.error(`Error fetching Composio tools for app `, error);
-    throw new Error(`Failed to fetch Composio tools for  ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Failed to fetch Composio tools for  ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 
-export async function enableComposioConnection(connectedAccountId: string,appName: string) {
+export async function enableComposioConnection(
+  connectedAccountId: string,
+  appName: string
+) {
   if (!connectedAccountId) {
     throw new Error("Composio connectedAccountId is not configured.");
   }
-   try {
+  try {
     const result = await initiateComposioConnection("default", appName);
-    const connectedID = await toolset.connectedAccounts.reinitiateConnection({ connectedAccountId, data: {}, redirectUri :result.redirectUrl || undefined });
+    const connectedID = await toolset.connectedAccounts.reinitiateConnection({
+      connectedAccountId,
+      data: {},
+      redirectUri: result.redirectUrl || undefined,
+    });
     return connectedID;
   } catch (error) {
     console.error(`Error enabling Composio connection for app `, error);
     // throw new Error(`Failed to enable Composio connection for app  ${error instanceof Error ? error.message : String(error)}`);
   }
 }
-
 
 // waitForConnectionActivation and getUserToolStatuses are removed/simplified
 // as their functionality is either handled by the client or no longer needed without persistence.

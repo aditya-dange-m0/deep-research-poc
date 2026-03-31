@@ -282,6 +282,8 @@ export default function Home() {
   const [translationResult, setTranslationResult] = useState<{
     originalText: string;
     translatedText: string;
+    sourceLanguage?: string;
+    targetLanguage?: string;
   } | null>(null);
   const [originalQuery, setOriginalQuery] = useState("");
 
@@ -395,6 +397,7 @@ export default function Home() {
   const handleTranslateSubmit = async (formData: {
     query: string;
     targetLanguage: string;
+    sourceLanguage: string;
     model: SupportedModel;
   }) => {
     setAppState("TRANSLATING");
@@ -420,7 +423,11 @@ export default function Home() {
       }
 
       const result = await response.json();
-      setTranslationResult(result);
+      setTranslationResult({
+        ...result,
+        sourceLanguage: formData.sourceLanguage,
+        targetLanguage: formData.targetLanguage,
+      });
       setAppState("TRANSLATION_COMPLETE");
     } catch (error) {
       console.error("Translation failed:", error);
@@ -524,6 +531,8 @@ export default function Home() {
           <TranslationDisplay
             originalText={translationResult.originalText}
             translatedText={translationResult.translatedText}
+            sourceLanguage={translationResult.sourceLanguage}
+            targetLanguage={translationResult.targetLanguage}
           />
         )}
 

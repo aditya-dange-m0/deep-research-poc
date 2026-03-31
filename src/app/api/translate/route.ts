@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { text, targetLanguage, model } = validation.data;
-    const modelToUse = model || 'openai:gpt-4o-mini';
+    const modelToUse = model || 'google:gemini-3-flash-preview';
 
     // Call the translation agent
     const { translatedText, usage } = await translateText({

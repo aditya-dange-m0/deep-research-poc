@@ -6,10 +6,8 @@ export type ID = string;
 // --- Input Validation Schema ---
 
 export const supportedModels = [
-  "openai:gpt-4o-mini",
-  "google:gemini-2.0-flash",
-  "google:gemini-2.5-flash-lite-preview-06-17",
-  "google:gemini-2.0-flash-lite-001"
+  "google:gemini-3.1-flash-lite-preview",
+  "google:gemini-3-flash-preview",
 ] as const;
 export type SupportedModel = (typeof supportedModels)[number];
 

@@ -300,8 +300,10 @@ async function deepResearch({
   const aggregatedFollowUpQuestions: string[] = [];
 
   for (const subQuery of subQueries) {
-    if (state.completedQueries.has(subQuery)) continue;
-    state.completedQueries.add(subQuery);
+    // Normalize before dedup so minor LLM wording variations don't duplicate work
+    const normalizedQuery = subQuery.trim().toLowerCase();
+    if (state.completedQueries.has(normalizedQuery)) continue;
+    state.completedQueries.add(normalizedQuery);
 
     const learningsBeforeSubQuery = state.allLearnings.length;
 
@@ -382,15 +384,14 @@ export async function startResearch(
 ) {
   // Initialize the state correctly, including the initialQuery
   if (requestBody.taskType === "fact-check") {
-    // --- Call the fact-checking workflow ---
     await factCheckWorkflow({
       claim: requestBody.initialQuery,
       model: requestBody.model,
       searchProvider: requestBody.searchProvider,
       onData,
     });
+    onData({ type: "done", data: { message: "Task complete.", totalUsage: { inputTokens: 0, outputTokens: 0 } } });
   } else {
-    // --- Call your existing deep research workflow ---
     const state: ResearchState = {
       initialQuery: requestBody.initialQuery,
       completedQueries: new Set<string>(),
@@ -424,18 +425,10 @@ export async function startResearch(
         data: "Research concluded, but no relevant learnings were found to generate a report.",
       });
     }
-  }
 
-  // The 'done' message is now sent once at the end, regardless of the path taken.
-  onData({
-    type: "done",
-    data: {
-      message: "Task complete.",
-      // Note: A more advanced implementation would return totalUsage from each workflow.
-      // For now, this signals completion.
-      totalUsage: { inputTokens: 0, outputTokens: 0 }, // Placeholder, can be refined.
-    },
-  });
+    // Emit real token totals from state
+    onData({ type: "done", data: { message: "Task complete.", totalUsage: state.tokenTracker } });
+  }
 }
 
 // Actually I have researched about E2B and they only provide CPU code runtime and it would be quite expensive to generate and run code on E2B sandbox.

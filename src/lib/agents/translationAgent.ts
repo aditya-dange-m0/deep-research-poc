@@ -22,8 +22,8 @@ ${text}
 
 **Translated Text:**`;
 
-  // Use a fast and cost-effective model for translation
-  const translationModel = getModelProvider("openai:gpt-4o-mini");
+  // Use the caller-supplied model, falling back to the faster flash variant
+  const translationModel = getModelProvider(model ?? 'google:gemini-3.1-flash-lite-preview');
 
   const { text: translatedText, usage } = await generateText({
     model: translationModel,
