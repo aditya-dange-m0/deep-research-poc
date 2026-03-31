@@ -135,6 +135,38 @@ User message (natural language)
 - **Conversation memory** — Redis-backed 10-turn history per session
 - **No hardcoded tool list** — tools are retrieved semantically from Pinecone at runtime, so adding a new Composio integration requires zero code changes
 
+### Dynamic Tool Search & Loading
+
+The agent never has a fixed list of tools compiled into it. Instead, at every turn it discovers which tools to use through a three-phase pipeline:
+
+```
+1. INGEST  (one-time, per app)
+   POST /api/agent/tools/ingest { appName: "GMAIL" }
+     └─ Composio SDK  → fetches every action for the app (name + description)
+          └─ OpenAI text-embedding-3-small → embeds each action description
+               └─ Pinecone upsert (namespace = appName, batch size 100)
+                    → each vector stored with { toolName, appKey } metadata
+
+2. SEARCH  (every agent turn, real-time)
+   POST /api/agent/tools/search { appName, userQuery, topK? }
+     └─ embed(userQuery)  → same OpenAI embedding model
+          └─ Pinecone ANN query (cosine, namespace = appName, topK = 3)
+               └─ returns top-K tool *names* ranked by semantic similarity
+
+3. EXECUTE  (agent reasoning loop)
+   POST /api/agent/chat
+     └─ Pinecone search → ["GMAIL_SEND_EMAIL", "GMAIL_CREATE_DRAFT", ...]
+          └─ Composio.getTools(toolNames) → full OpenAI-schema tool definitions
+               └─ injected into generateText({ tools }) at call time
+                    └─ agent calls only the tools that matched the query
+```
+
+**Why this matters:**
+- Tool definitions are only loaded when semantically relevant — the LLM context window never fills up with irrelevant schemas
+- Adding a new app integration is a single `POST /api/agent/tools/ingest` call — no code changes, no redeploy
+- Each app's tools are stored in their own Pinecone namespace — search is scoped and fast regardless of total registry size
+- `topK` is tunable per request; defaults to 3 to keep the injected tool list minimal
+
 ---
 
 ## Tech Stack
