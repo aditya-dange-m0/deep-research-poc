@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToolCard } from "./ToolCard";
-import { getAvailableComposioTools } from "@/lib/agent-backend/composioService";
+import { AVAILABLE_TOOLS } from "@/data/available_tools";
 import { Loader2 } from "lucide-react";
 
 interface Tool {
@@ -91,8 +91,7 @@ export function ToolsModal({ isOpen, onClose, sessionId }: ToolsModalProps) {
       const fetchTools = async () => {
         setIsLoading(true);
         try {
-          const mockToolsRaw = await getAvailableComposioTools();
-          const mockTools: Tool[] = mockToolsRaw.map((tool: any) => ({
+          const mockTools: Tool[] = AVAILABLE_TOOLS.map((tool) => ({
             ...tool,
             connectionStatus: activeConnections[tool.appName] ? 'ACTIVE' : null,
             connectedAccountId: activeConnections[tool.appName]
